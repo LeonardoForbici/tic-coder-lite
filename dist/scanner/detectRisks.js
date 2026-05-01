@@ -38,6 +38,7 @@ exports.renderRisksMarkdown = renderRisksMarkdown;
 const fs = __importStar(require("node:fs/promises"));
 const path = __importStar(require("node:path"));
 const fileUtils_1 = require("../utils/fileUtils");
+const detectPlSql_1 = require("./detectPlSql");
 const EMPTY_SUMMARY = {
     total: 0,
     low: 0,
@@ -79,6 +80,7 @@ async function detectRisks(scan, inventory, graph, options = {}) {
     detectLayerViolations(graph, risks);
     detectCircularDependencies(graph, risks);
     detectControllerEndpointVolume(inventory, risks);
+    risks.push(...await (0, detectPlSql_1.detectPlSqlRisks)(scan, inventory.plsql));
     const uniqueRisks = dedupeRisks(risks).sort(compareRisks);
     return {
         projectName: scan.projectName,

@@ -28,6 +28,31 @@ export function generateAgentContextMd(summary: ProjectSummary): string {
   const readingOrder = buildReadingOrder(summary)
     .map((file, index) => `${index + 1}. ${file}`)
     .join('\n');
+  const plsql = summary.inventory.plsql;
+  const plsqlPackages = plsql.entities
+    .filter((entity) => entity.kind === 'package' || entity.kind === 'package_body')
+    .slice(0, 20)
+    .map((entity) => `- ${entity.name} (${entity.kind}) em ${entity.file}:${entity.line}`)
+    .join('\n');
+  const plsqlRoutines = plsql.entities
+    .filter((entity) => entity.kind === 'procedure' || entity.kind === 'function')
+    .slice(0, 20)
+    .map((entity) => `- ${entity.name} em ${entity.file}:${entity.line}`)
+    .join('\n');
+  const plsqlTriggers = plsql.entities
+    .filter((entity) => entity.kind === 'trigger')
+    .slice(0, 20)
+    .map((entity) => `- ${entity.name}${entity.targetTable ? ` ON ${entity.targetTable}` : ''} em ${entity.file}:${entity.line}`)
+    .join('\n');
+  const plsqlTables = plsql.tableReferences
+    .slice(0, 20)
+    .map((table) => `- ${table.name}: ${table.reads} leitura(s), ${table.writes} escrita(s)`)
+    .join('\n');
+  const plsqlRiskLines = summary.risks.risks
+    .filter((risk) => risk.category === 'plsql')
+    .slice(0, 20)
+    .map((risk) => `- ${risk.level.toUpperCase()} ${risk.title} (${risk.file}${risk.line ? `:${risk.line}` : ''})`)
+    .join('\n');
 
   return `# Contexto para IA do TIC Coder Lite
 
@@ -72,6 +97,43 @@ ${dependencies || '- Nenhuma dependência importante identificada'}
 ## Principais Riscos
 
 ${risks || '- Nenhum risco determinístico detectado'}
+
+## Banco / PL/SQL
+
+- Arquivos PL/SQL: ${plsql.files.length}
+- Packages: ${plsql.counts.package}
+- Package bodies: ${plsql.counts.package_body}
+- Procedures: ${plsql.counts.procedure}
+- Functions: ${plsql.counts.function}
+- Triggers: ${plsql.counts.trigger}
+- Tabelas referenciadas: ${plsql.tableReferences.length}
+
+### Packages detectados
+
+${plsqlPackages || '- Nenhum package detectado.'}
+
+### Procedures e functions criticas
+
+${plsqlRoutines || '- Nenhuma procedure/function detectada.'}
+
+### Triggers
+
+${plsqlTriggers || '- Nenhum trigger detectado.'}
+
+### Tabelas mais referenciadas
+
+${plsqlTables || '- Nenhuma tabela referenciada.'}
+
+### Riscos transacionais e PL/SQL
+
+${plsqlRiskLines || '- Nenhum risco PL/SQL detectado.'}
+
+### Aviso para IA
+
+- Regras de negocio criticas podem estar escondidas no banco.
+- Packages, procedures e triggers podem executar validacoes que nao aparecem no backend/frontend.
+- Nao altere COMMIT, ROLLBACK, autonomous transaction, triggers ou SQL dinamico sem validacao humana.
+- Use .tic-code/projects/database/agent-context.md para o contexto focado em PL/SQL.
 
 ## Ordem Recomendada de Leitura
 
@@ -161,6 +223,8 @@ function buildReadingOrder(summary: ProjectSummary): string[] {
     '.tic-code/inventory.md',
     '.tic-code/architecture.md',
     '.tic-code/risks.md',
+    '.tic-code/projects/database/agent-context.md',
+    ...summary.inventory.plsql.entities.slice(0, 12).map((entity) => entity.file),
     ...summary.graph.stats.centralFiles.map((file) => file.path),
     ...summary.risks.risks.slice(0, 8).map((risk) => risk.file)
   ]).slice(0, 18);

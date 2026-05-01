@@ -176,6 +176,7 @@ function getOverviewStyles() {
     .node.entity { color: var(--green); }
     .node.dto { color: var(--blue); }
     .node.config, .node.security { color: #f97316; }
+    .node.database { color: #34d399; }
     .node.external { color: #94a3b8; }
     .node.unknown { color: #a3e635; }
     .node.high, .node.critical { color: var(--danger); }
@@ -261,6 +262,7 @@ function getOverviewScript(nonce) {
         dto: 'dto',
         config: 'config',
         security: 'security',
+        database: 'database',
         external: 'external',
         unknown: 'unknown'
       }[module] || 'unknown';
@@ -271,7 +273,7 @@ function getOverviewScript(nonce) {
       const maxEdges = Math.max(20, Math.round(state.graph.edges.length * graphState.density / 100));
       const module = graphState.module;
       const nodes = state.graph.nodes.filter((node) => {
-        const moduleOk = module === 'todos' || node.module === module;
+        const moduleOk = module === 'todos' || matchesProjectType(node, module) || node.module === module;
         const searchOk = !search || node.label.toLowerCase().includes(search) || node.path.toLowerCase().includes(search);
         return moduleOk && searchOk;
       });
@@ -284,8 +286,24 @@ function getOverviewScript(nonce) {
       const select = $('moduleFilter');
       if (!select || select.dataset.ready) return;
       const modules = [...new Set(state.graph.nodes.map((node) => node.module))].sort();
-      select.innerHTML = '<option value="todos">Todos os módulos</option>' + modules.map((module) => '<option value="' + escapeHtml(module) + '">' + escapeHtml(moduleLabel(module)) + '</option>').join('');
+      const projectTypes = [
+        ['backend', 'Backend'],
+        ['frontend', 'Frontend'],
+        ['mobile', 'Mobile'],
+        ['database', 'Database / PL/SQL']
+      ];
+      select.innerHTML = '<option value="todos">Todos os tipos</option>' +
+        projectTypes.map(([value, label]) => '<option value="' + value + '">' + label + '</option>').join('') +
+        modules.map((module) => '<option value="' + escapeHtml(module) + '">' + escapeHtml(moduleLabel(module)) + '</option>').join('');
       select.dataset.ready = 'true';
+    }
+
+    function matchesProjectType(node, type) {
+      if (type === 'database') return node.module === 'database' || node.language === 'PL/SQL' || String(node.type).startsWith('plsql_');
+      if (type === 'backend') return node.language === 'Java' || node.module === 'controller' || node.module === 'service' || node.module === 'repository';
+      if (type === 'frontend') return /TypeScript|JavaScript|React/.test(node.language) && !/server|backend/i.test(node.path);
+      if (type === 'mobile') return /android|ios|mobile|react-native|flutter|dart/i.test(node.path);
+      return false;
     }
 
     function renderGraph() {
@@ -395,6 +413,7 @@ function getOverviewScript(nonce) {
         dto: 'DTO',
         config: 'Configuração',
         security: 'Segurança',
+        database: 'Database / PL/SQL',
         external: 'Dependência externa',
         unknown: 'Não classificado'
       }[value] || value;
@@ -409,6 +428,15 @@ function getOverviewScript(nonce) {
         config: 'Configuração',
         documentation: 'Documentação',
         external_dependency: 'Dependência externa',
+        plsql_script: 'Script PL/SQL',
+        plsql_package: 'Package PL/SQL',
+        plsql_package_body: 'Package body PL/SQL',
+        plsql_procedure: 'Procedure PL/SQL',
+        plsql_function: 'Function PL/SQL',
+        plsql_trigger: 'Trigger PL/SQL',
+        plsql_table: 'Tabela PL/SQL',
+        plsql_view: 'View PL/SQL',
+        plsql_cursor: 'Cursor PL/SQL',
         file: 'Arquivo'
       }[value] || value;
     }

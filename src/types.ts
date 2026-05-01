@@ -3,6 +3,20 @@ import type { ArchitectureInventory } from './scanner/detectStack';
 import type { RiskReport } from './scanner/detectRisks';
 import type { ScanResult } from './scanner/scanWorkspace';
 
+export type DetectedProjectKind = 'backend' | 'frontend' | 'mobile' | 'infra' | 'shared' | 'database' | 'unknown';
+
+export interface DetectedProject {
+  id: string;
+  name: string;
+  rootPath: string;
+  relativePath: string;
+  kind: DetectedProjectKind;
+  stack: string[];
+  evidence: string[];
+  files: number;
+  risks: number;
+}
+
 export type LanguageStats = Record<string, number>;
 
 export interface AgentEngine {

@@ -5,6 +5,7 @@ import type { ArchitectureInventory } from './detectStack';
 import type { LightweightGraph } from './buildGraph';
 import type { CancellationLike } from './scanFiles';
 import type { ScanResult } from './scanWorkspace';
+import { detectPlSqlRisks } from './detectPlSql';
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
@@ -17,6 +18,7 @@ export interface RiskFinding {
   reason: string;
   recommendation: string;
   evidence: string;
+  category?: 'plsql' | 'general';
 }
 
 export interface RiskSummary {
@@ -88,6 +90,7 @@ export async function detectRisks(scan: ScanResult, inventory: ArchitectureInven
   detectLayerViolations(graph, risks);
   detectCircularDependencies(graph, risks);
   detectControllerEndpointVolume(inventory, risks);
+  risks.push(...await detectPlSqlRisks(scan, inventory.plsql));
 
   const uniqueRisks = dedupeRisks(risks).sort(compareRisks);
 

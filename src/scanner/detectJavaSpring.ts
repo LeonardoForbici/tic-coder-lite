@@ -10,6 +10,7 @@ export type ModuleKind =
   | 'dto'
   | 'config'
   | 'security'
+  | 'database'
   | 'unknown';
 
 export interface JavaSpringFile {
@@ -50,6 +51,7 @@ const EMPTY_COUNTS: Record<ModuleKind, number> = {
   dto: 0,
   config: 0,
   security: 0,
+  database: 0,
   unknown: 0
 };
 

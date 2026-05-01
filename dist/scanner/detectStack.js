@@ -40,13 +40,15 @@ const path = __importStar(require("node:path"));
 const fileUtils_1 = require("../utils/fileUtils");
 const ignoreRules_1 = require("./ignoreRules");
 const detectJavaSpring_1 = require("./detectJavaSpring");
+const detectPlSql_1 = require("./detectPlSql");
 const detectTypeScriptProject_1 = require("./detectTypeScriptProject");
-const MODULE_KINDS = ['controller', 'service', 'repository', 'entity', 'dto', 'config', 'security', 'unknown'];
+const MODULE_KINDS = ['controller', 'service', 'repository', 'entity', 'dto', 'config', 'security', 'database', 'unknown'];
 async function detectStack(scan) {
     const projectFiles = await collectProjectFiles(scan.rootPath, Math.min(scan.limits?.maxFiles ?? 10000, 10000));
     const fileSet = new Set([...scan.files.map((file) => file.relativePath), ...projectFiles]);
     const javaSpring = await (0, detectJavaSpring_1.detectJavaSpring)(scan);
     const typeScript = await (0, detectTypeScriptProject_1.detectTypeScriptProject)(scan);
+    const plsql = await (0, detectPlSql_1.detectPlSql)(scan);
     const databaseEvidence = detectDatabaseEvidence(fileSet);
     const dockerEvidence = findByBasename(fileSet, ['docker-compose.yml', 'docker-compose.yaml']);
     return {
@@ -58,13 +60,14 @@ async function detectStack(scan) {
         typeScript,
         modules: buildModules(scan, javaSpring),
         database: {
-            detected: databaseEvidence.length > 0,
+            detected: databaseEvidence.length > 0 || plsql.detected,
             evidence: databaseEvidence
         },
         docker: {
             detected: dockerEvidence.length > 0,
             evidence: dockerEvidence
-        }
+        },
+        plsql
     };
 }
 function renderInventoryMarkdown(inventory, scan) {
@@ -83,7 +86,20 @@ function renderInventoryMarkdown(inventory, scan) {
     const frameworkLines = inventory.typeScript.frameworks.map((framework) => `- ${framework}`).join('\n');
     const stackLines = detectedStacks.map((signal) => `- ${signal.name}: ${signal.evidence.join(', ')}`).join('\n');
     const dependencyLines = Object.entries(inventory.typeScript.dependencies).slice(0, 30).map(([name, version]) => `- ${name}: ${version}`).join('\n');
-    return `# Inventário do TIC Coder Lite
+    const plsqlLines = [
+        `- Arquivos PL/SQL: ${inventory.plsql.files.length}`,
+        `- Packages: ${inventory.plsql.counts.package}`,
+        `- Package bodies: ${inventory.plsql.counts.package_body}`,
+        `- Procedures: ${inventory.plsql.counts.procedure}`,
+        `- Functions: ${inventory.plsql.counts.function}`,
+        `- Triggers: ${inventory.plsql.counts.trigger}`,
+        `- Tabelas referenciadas: ${inventory.plsql.tableReferences.length}`
+    ].join('\n');
+    const plsqlTables = inventory.plsql.tableReferences
+        .slice(0, 20)
+        .map((table) => `- ${table.name}: ${table.reads} leitura(s), ${table.writes} escrita(s)`)
+        .join('\n');
+    return `# Inventario do TIC Coder Lite
 
 Gerado em: ${inventory.generatedAt}
 Projeto: ${inventory.projectName}
@@ -99,43 +115,53 @@ Raiz: ${inventory.rootPath}
 
 ${stackLines || '- Nenhum sinal convencional de stack detectado'}
 
-## Arquitetura por Convenção
+## Arquitetura por Convencao
 
-${moduleSections || '- Nenhum módulo Java/Spring classificado ainda'}
+${moduleSections || '- Nenhum modulo Java/Spring classificado ainda'}
 
 ## Sinais Java / Spring
 
-- Anotações Spring detectadas: ${inventory.javaSpring.detected ? 'sim' : 'não'}
+- Anotacoes Spring detectadas: ${inventory.javaSpring.detected ? 'sim' : 'nao'}
 - Arquivos Java classificados: ${inventory.javaSpring.files.length}
 
 ${formatAnnotationCounts(inventory.javaSpring.annotations)}
 
 ## Endpoints HTTP
 
-${endpoints || '- Nenhuma anotação de mapeamento Spring detectada'}
+${endpoints || '- Nenhuma anotacao de mapeamento Spring detectada'}
 
 ## Sinais TypeScript / Node
 
 ${frameworkLines || '- Nenhum sinal de framework TypeScript/Node detectado'}
 
-### Dependências de Runtime
+### Dependencias de Runtime
 
-${dependencyLines || '- Nenhuma dependência de package.json detectada'}
+${dependencyLines || '- Nenhuma dependencia de package.json detectada'}
 
 ## Dados e Infraestrutura
 
-- Evidência de banco/SQL: ${inventory.database.evidence.join(', ') || 'nenhuma'}
-- Evidência de Docker: ${inventory.docker.evidence.join(', ') || 'nenhuma'}
+- Evidencia de banco/SQL: ${inventory.database.evidence.join(', ') || 'nenhuma'}
+- Evidencia de Docker: ${inventory.docker.evidence.join(', ') || 'nenhuma'}
 
-## Orientação para Agentes de IA
+## Banco / PL/SQL
 
-- Trate este arquivo como inventário local baseado em convenções, não como grafo semântico completo.
-- Prefira arquivos listados em Arquitetura por Convenção ao alterar comportamento em uma camada específica.
-- Confirme módulos inferidos abrindo os arquivos citados antes de editar.
-- Este inventário foi gerado sem IA, bancos, RAG, servidores ou serviços remotos.
+${inventory.plsql.detected ? plsqlLines : '- Nenhum PL/SQL detectado'}
+
+### Tabelas mais referenciadas
+
+${plsqlTables || '- Nenhuma referencia a tabela detectada'}
+
+## Orientacao para Agentes de IA
+
+- Trate este arquivo como inventario local baseado em convencoes, nao como grafo semantico completo.
+- Prefira arquivos listados em Arquitetura por Convencao ao alterar comportamento em uma camada especifica.
+- Confirme modulos inferidos abrindo os arquivos citados antes de editar.
+- Regras criticas podem estar escondidas em packages, triggers e procedures PL/SQL.
+- Este inventario foi gerado sem IA, bancos, RAG, servidores ou servicos remotos.
 `;
 }
 function buildStackSignals(fileSet, javaSpring, typeScript, databaseEvidence, dockerEvidence) {
+    const plsqlEvidence = [...fileSet].filter((file) => isPlSqlPath(file)).slice(0, 20);
     return [
         signal('java-maven', 'Java / Maven', findByBasename(fileSet, ['pom.xml'])),
         signal('java-gradle', 'Java / Gradle', findByBasename(fileSet, ['build.gradle', 'build.gradle.kts'])),
@@ -146,17 +172,18 @@ function buildStackSignals(fileSet, javaSpring, typeScript, databaseEvidence, do
         signal('vite', 'Vite', findByBasename(fileSet, ['vite.config.ts', 'vite.config.js']).length > 0 || typeScript.frameworks.includes('Vite'), dependencyEvidence(typeScript, ['vite']).concat(findByBasename(fileSet, ['vite.config.ts', 'vite.config.js']))),
         signal('spring-boot', 'Spring Boot', javaSpring.detected || findByBasename(fileSet, ['application.yml', 'application.yaml', 'application.properties']).length > 0, findByBasename(fileSet, ['application.yml', 'application.yaml', 'application.properties']).concat(Object.keys(javaSpring.annotations).map((annotation) => `@${annotation}`))),
         signal('docker', 'Docker Compose', dockerEvidence.length > 0, dockerEvidence),
-        signal('database', 'SQL / Database', databaseEvidence.length > 0, databaseEvidence)
+        signal('database', 'SQL / Database', databaseEvidence.length > 0, databaseEvidence),
+        signal('oracle-plsql', 'Oracle PL/SQL', plsqlEvidence.length > 0, plsqlEvidence)
     ];
 }
 function buildModules(scan, javaSpring) {
     const javaFilesByKind = new Map(javaSpring.files.map((file) => [file.path, file.kind]));
     const filesByKind = new Map(MODULE_KINDS.map((kind) => [kind, new Set()]));
     for (const file of scan.files) {
-        if (!['.java', '.ts', '.tsx', '.js', '.jsx'].includes(file.extension)) {
+        if (!['.java', '.ts', '.tsx', '.js', '.jsx', '.sql', '.pks', '.pkb', '.prc', '.fnc', '.pkg', '.trg', '.pls', '.plsql'].includes(file.extension)) {
             continue;
         }
-        const kind = javaFilesByKind.get(file.relativePath) ?? classifyByPath(file.relativePath);
+        const kind = isPlSqlPath(file.relativePath) ? 'database' : javaFilesByKind.get(file.relativePath) ?? classifyByPath(file.relativePath);
         filesByKind.get(kind)?.add(file.relativePath);
     }
     return MODULE_KINDS.map((kind) => ({
@@ -167,6 +194,9 @@ function buildModules(scan, javaSpring) {
 function classifyByPath(relativePath) {
     const lower = relativePath.toLowerCase();
     const baseName = path.basename(lower, path.extname(lower));
+    if (isPlSqlPath(relativePath) || lower.includes('/db/') || lower.includes('/database/') || lower.includes('/oracle/') || lower.includes('/plsql/') || lower.includes('/migrations/')) {
+        return 'database';
+    }
     if (lower.includes('/controller/') || lower.includes('/controllers/') || baseName.endsWith('controller')) {
         return 'controller';
     }
@@ -228,7 +258,7 @@ function detectDatabaseEvidence(fileSet) {
     const evidence = new Set();
     for (const file of fileSet) {
         const lower = file.toLowerCase();
-        if (lower.endsWith('/schema.sql') || lower === 'schema.sql' || lower.endsWith('.sql') || lower.includes('/migrations/') || lower.includes('/migration/')) {
+        if (lower.endsWith('/schema.sql') || lower === 'schema.sql' || lower.endsWith('.sql') || lower.includes('/migrations/') || lower.includes('/migration/') || isPlSqlPath(lower)) {
             evidence.add(file);
         }
     }
@@ -253,12 +283,15 @@ function findByBasename(fileSet, basenames) {
 }
 function formatAnnotationCounts(annotations) {
     const lines = Object.entries(annotations).map(([annotation, count]) => `- @${annotation}: ${count}`);
-    return lines.length > 0 ? lines.join('\n') : '- Nenhuma anotação Spring encontrada';
+    return lines.length > 0 ? lines.join('\n') : '- Nenhuma anotacao Spring encontrada';
 }
 function titleCase(value) {
     return value.charAt(0).toUpperCase() + value.slice(1);
 }
 function normalizeRelativePath(value) {
     return value.split(path.sep).join('/');
+}
+function isPlSqlPath(file) {
+    return /\.(sql|pks|pkb|prc|fnc|pkg|trg|pls|plsql)$/i.test(file);
 }
 //# sourceMappingURL=detectStack.js.map

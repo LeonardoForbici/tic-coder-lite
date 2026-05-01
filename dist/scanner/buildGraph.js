@@ -75,6 +75,7 @@ async function buildGraph(scan, inventory, options = {}) {
         }
     }
     const nodes = [...nodeByPath.values(), ...packageNodes.values()];
+    addPlSqlGraph(inventory, nodeByPath, nodes, edges, edgeKeys);
     applyRiskLevels(nodes, edges);
     return {
         projectName: scan.projectName,
@@ -84,6 +85,101 @@ async function buildGraph(scan, inventory, options = {}) {
         edges: edges.sort((a, b) => `${a.from}|${a.to}`.localeCompare(`${b.from}|${b.to}`)),
         stats: buildStats(nodes, edges)
     };
+}
+function addPlSqlGraph(inventory, fileNodes, nodes, edges, edgeKeys) {
+    if (!inventory.plsql.detected) {
+        return;
+    }
+    const plsqlNodes = new Map();
+    const routineByName = new Map();
+    const tableByName = new Map();
+    for (const entity of inventory.plsql.entities) {
+        const node = {
+            id: entity.id,
+            label: entity.name,
+            path: entity.file,
+            type: plsqlType(entity.kind),
+            module: 'database',
+            language: 'PL/SQL'
+        };
+        plsqlNodes.set(entity.id, node);
+        nodes.push(node);
+        if (['package', 'package_body', 'procedure', 'function', 'trigger', 'cursor'].includes(entity.kind)) {
+            routineByName.set(entity.name.toUpperCase(), node);
+            routineByName.set(entity.name.split('.').pop()?.toUpperCase() ?? entity.name.toUpperCase(), node);
+        }
+        const fileNode = fileNodes.get(entity.file);
+        if (fileNode) {
+            pushEdge(edges, edgeKeys, fileNode.id, node.id, 'DEFINES', entity.file, entity.name);
+        }
+        if (entity.kind === 'table') {
+            tableByName.set(entity.name.toUpperCase(), node);
+        }
+    }
+    for (const table of inventory.plsql.tableReferences) {
+        if (!tableByName.has(table.name)) {
+            const node = {
+                id: `plsql:table:${table.name}`,
+                label: table.name,
+                path: table.name,
+                type: 'plsql_table',
+                module: 'database',
+                language: 'PL/SQL'
+            };
+            tableByName.set(table.name, node);
+            nodes.push(node);
+        }
+    }
+    for (const dependency of inventory.plsql.dependencies) {
+        const source = plsqlNodes.get(dependency.sourceId);
+        if (!source) {
+            continue;
+        }
+        let target;
+        if (dependency.targetKind === 'table') {
+            target = tableByName.get(dependency.targetName.toUpperCase());
+        }
+        else {
+            target = routineByName.get(dependency.targetName.toUpperCase()) ?? routineByName.get(dependency.targetName.split('.').pop()?.toUpperCase() ?? dependency.targetName.toUpperCase());
+        }
+        if (!target && dependency.targetKind === 'routine') {
+            target = {
+                id: `plsql:external_routine:${dependency.targetName}`,
+                label: dependency.targetName,
+                path: dependency.targetName,
+                type: 'plsql_procedure',
+                module: 'database',
+                language: 'PL/SQL'
+            };
+            routineByName.set(dependency.targetName.toUpperCase(), target);
+            nodes.push(target);
+        }
+        if (target) {
+            pushEdge(edges, edgeKeys, source.id, target.id, dependency.edgeType, dependency.file, target.path);
+        }
+    }
+}
+function pushEdge(edges, edgeKeys, from, to, type, sourcePath, targetPath) {
+    const key = `${from}|${to}|${type}`;
+    if (edgeKeys.has(key)) {
+        return;
+    }
+    edgeKeys.add(key);
+    edges.push({ from, to, type, sourcePath, targetPath });
+}
+function plsqlType(kind) {
+    return {
+        package: 'plsql_package',
+        package_body: 'plsql_package_body',
+        procedure: 'plsql_procedure',
+        function: 'plsql_function',
+        trigger: 'plsql_trigger',
+        table: 'plsql_table',
+        view: 'plsql_view',
+        cursor: 'plsql_cursor',
+        type: 'plsql_type',
+        synonym: 'plsql_synonym'
+    }[kind] ?? 'plsql_object';
 }
 function renderArchitectureMarkdown(graph, inventory) {
     const modules = Object.entries(graph.stats.modules)
@@ -378,8 +474,8 @@ function typeFromFile(file) {
     if (['.ts', '.tsx', '.js', '.jsx'].includes(file.extension)) {
         return 'script_source';
     }
-    if (file.extension === '.sql') {
-        return 'database_script';
+    if (['.sql', '.pks', '.pkb', '.prc', '.fnc', '.pkg', '.trg', '.pls', '.plsql'].includes(file.extension)) {
+        return 'plsql_script';
     }
     if (['.json', '.xml', '.yml', '.yaml'].includes(file.extension)) {
         return 'config';
@@ -401,6 +497,14 @@ function languageFromExtension(extension) {
         '.yml': 'YAML',
         '.yaml': 'YAML',
         '.sql': 'SQL',
+        '.pks': 'PL/SQL',
+        '.pkb': 'PL/SQL',
+        '.prc': 'PL/SQL',
+        '.fnc': 'PL/SQL',
+        '.pkg': 'PL/SQL',
+        '.trg': 'PL/SQL',
+        '.pls': 'PL/SQL',
+        '.plsql': 'PL/SQL',
         '.md': 'Markdown'
     };
     return languages[extension] ?? 'Desconhecido';

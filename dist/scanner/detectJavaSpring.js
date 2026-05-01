@@ -58,6 +58,7 @@ const EMPTY_COUNTS = {
     dto: 0,
     config: 0,
     security: 0,
+    database: 0,
     unknown: 0
 };
 async function detectJavaSpring(scan) {

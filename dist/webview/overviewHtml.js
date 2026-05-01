@@ -12,6 +12,8 @@ function renderOverviewHtml(input) {
     const modules = summary.inventory.modules.filter((module) => module.files.length > 0);
     const detectedEngines = engines.filter((engine) => engine.detected);
     const stack = summary.inventory.stack.filter((signal) => signal.detected);
+    const plsql = summary.inventory.plsql;
+    const plsqlRisks = summary.risks.risks.filter((risk) => risk.category === 'plsql');
     const data = {
         graph,
         project: summary.workspaceName,
@@ -49,6 +51,7 @@ function renderOverviewHtml(input) {
       ${metric('Metodos estimados', methods)}
       ${metric('Riscos', summary.risks.summary.total)}
       ${metric('Engines de IA', detectedEngines.length)}
+      ${metric('Database / PL/SQL', plsql.files.length)}
     </section>
 
     <section class="section">
@@ -152,6 +155,22 @@ function renderOverviewHtml(input) {
     <section class="section">
       <h2>Riscos</h2>
       <ul>${highRiskFiles.map((file) => `<li><span class="mono">${escapeHtml(file.path)}</span><span class="risk-${escapeHtml(file.level)}">${riskLabel(file.level)}</span></li>`).join('') || '<li><span>Nenhum risco alto detectado.</span></li>'}</ul>
+    </section>
+
+    <section class="section">
+      <h2>Database / PL/SQL</h2>
+      <div class="metrics">
+        ${metric('Packages', plsql.counts.package + plsql.counts.package_body)}
+        ${metric('Procedures', plsql.counts.procedure)}
+        ${metric('Functions', plsql.counts.function)}
+        ${metric('Triggers', plsql.counts.trigger)}
+        ${metric('Tabelas', plsql.tableReferences.length)}
+        ${metric('Riscos PL/SQL', plsqlRisks.length)}
+      </div>
+      <h3>Tabelas mais referenciadas</h3>
+      <ul>${plsql.tableReferences.slice(0, 10).map((table) => `<li><span class="mono">${escapeHtml(table.name)}</span><span>${table.reads} leituras / ${table.writes} escritas</span></li>`).join('') || '<li><span>Nenhuma tabela PL/SQL detectada.</span></li>'}</ul>
+      <h3 style="margin-top:14px">Riscos PL/SQL</h3>
+      <ul>${plsqlRisks.slice(0, 12).map((risk) => `<li><span class="mono">${escapeHtml(risk.title)} (${escapeHtml(risk.file)}${risk.line ? `:${risk.line}` : ''})</span><span class="risk-${escapeHtml(risk.level)}">${riskLabel(risk.level)}</span></li>`).join('') || '<li><span>Nenhum risco PL/SQL detectado.</span></li>'}</ul>
     </section>
 
     <section class="section">

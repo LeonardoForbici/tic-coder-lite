@@ -60,6 +60,14 @@ exports.SUPPORTED_EXTENSIONS = new Set([
     '.yml',
     '.yaml',
     '.sql',
+    '.pks',
+    '.pkb',
+    '.prc',
+    '.fnc',
+    '.pkg',
+    '.trg',
+    '.pls',
+    '.plsql',
     '.md'
 ]);
 function shouldIgnoreDirectory(name) {
