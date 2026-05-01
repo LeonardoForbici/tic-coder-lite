@@ -1,0 +1,271 @@
+{
+  "projectName": "tic-coder-lite",
+  "rootPath": "C:\\git\\tic-coder-lite",
+  "scannedAt": "2026-04-30T23:12:27.883Z",
+  "files": [
+    {
+      "relativePath": "NOTICE.md",
+      "extension": ".md",
+      "size": 1255,
+      "lines": 43
+    },
+    {
+      "relativePath": "package-lock.json",
+      "extension": ".json",
+      "size": 1871,
+      "lines": 59
+    },
+    {
+      "relativePath": "package.json",
+      "extension": ".json",
+      "size": 4236,
+      "lines": 138
+    },
+    {
+      "relativePath": "README.md",
+      "extension": ".md",
+      "size": 2535,
+      "lines": 103
+    },
+    {
+      "relativePath": "src/commands/analyzeProject.ts",
+      "extension": ".ts",
+      "size": 5341,
+      "lines": 174
+    },
+    {
+      "relativePath": "src/commands/enhanceWithLocalAi.ts",
+      "extension": ".ts",
+      "size": 3802,
+      "lines": 100
+    },
+    {
+      "relativePath": "src/commands/exportAgentsMd.ts",
+      "extension": ".ts",
+      "size": 253,
+      "lines": 6
+    },
+    {
+      "relativePath": "src/commands/generateAgentContext.ts",
+      "extension": ".ts",
+      "size": 1372,
+      "lines": 29
+    },
+    {
+      "relativePath": "src/commands/openOverview.ts",
+      "extension": ".ts",
+      "size": 221,
+      "lines": 6
+    },
+    {
+      "relativePath": "src/exporters/generateAgentContextMd.ts",
+      "extension": ".ts",
+      "size": 7376,
+      "lines": 193
+    },
+    {
+      "relativePath": "src/exporters/generateConfidenceReportMd.ts",
+      "extension": ".ts",
+      "size": 2558,
+      "lines": 61
+    },
+    {
+      "relativePath": "src/exporters/generateQuestionsMd.ts",
+      "extension": ".ts",
+      "size": 2185,
+      "lines": 48
+    },
+    {
+      "relativePath": "src/exporters/writeTicCodeFolder.ts",
+      "extension": ".ts",
+      "size": 2796,
+      "lines": 55
+    },
+    {
+      "relativePath": "src/extension.ts",
+      "extension": ".ts",
+      "size": 6334,
+      "lines": 124
+    },
+    {
+      "relativePath": "src/local-ai/checkOllamaStatus.ts",
+      "extension": ".ts",
+      "size": 1884,
+      "lines": 65
+    },
+    {
+      "relativePath": "src/local-ai/enhanceAgentContext.ts",
+      "extension": ".ts",
+      "size": 1715,
+      "lines": 58
+    },
+    {
+      "relativePath": "src/local-ai/enhanceModuleSummary.ts",
+      "extension": ".ts",
+      "size": 963,
+      "lines": 36
+    },
+    {
+      "relativePath": "src/local-ai/ollamaClient.ts",
+      "extension": ".ts",
+      "size": 1666,
+      "lines": 62
+    },
+    {
+      "relativePath": "src/reversa-adapter/detectEngines.ts",
+      "extension": ".ts",
+      "size": 3696,
+      "lines": 130
+    },
+    {
+      "relativePath": "src/reversa-adapter/engineTypes.ts",
+      "extension": ".ts",
+      "size": 724,
+      "lines": 34
+    },
+    {
+      "relativePath": "src/reversa-adapter/exportForEngines.ts",
+      "extension": ".ts",
+      "size": 3369,
+      "lines": 80
+    },
+    {
+      "relativePath": "src/reversa-adapter/generateAgentsMd.ts",
+      "extension": ".ts",
+      "size": 2822,
+      "lines": 78
+    },
+    {
+      "relativePath": "src/reversa-adapter/generateClaudeMd.ts",
+      "extension": ".ts",
+      "size": 358,
+      "lines": 11
+    },
+    {
+      "relativePath": "src/reversa-adapter/generateCopilotInstructions.ts",
+      "extension": ".ts",
+      "size": 386,
+      "lines": 11
+    },
+    {
+      "relativePath": "src/reversa-adapter/generateCursorRules.ts",
+      "extension": ".ts",
+      "size": 341,
+      "lines": 11
+    },
+    {
+      "relativePath": "src/reversa-adapter/generateGeminiMd.ts",
+      "extension": ".ts",
+      "size": 341,
+      "lines": 11
+    },
+    {
+      "relativePath": "src/reversa-adapter/safeWriter.ts",
+      "extension": ".ts",
+      "size": 4624,
+      "lines": 133
+    },
+    {
+      "relativePath": "src/scanner/buildGraph.ts",
+      "extension": ".ts",
+      "size": 14623,
+      "lines": 496
+    },
+    {
+      "relativePath": "src/scanner/detectJavaSpring.ts",
+      "extension": ".ts",
+      "size": 4948,
+      "lines": 166
+    },
+    {
+      "relativePath": "src/scanner/detectRisks.ts",
+      "extension": ".ts",
+      "size": 17800,
+      "lines": 454
+    },
+    {
+      "relativePath": "src/scanner/detectStack.ts",
+      "extension": ".ts",
+      "size": 11091,
+      "lines": 289
+    },
+    {
+      "relativePath": "src/scanner/detectTypeScriptProject.ts",
+      "extension": ".ts",
+      "size": 4344,
+      "lines": 123
+    },
+    {
+      "relativePath": "src/scanner/ignoreRules.ts",
+      "extension": ".ts",
+      "size": 612,
+      "lines": 36
+    },
+    {
+      "relativePath": "src/scanner/parseImports.ts",
+      "extension": ".ts",
+      "size": 4558,
+      "lines": 146
+    },
+    {
+      "relativePath": "src/scanner/scanFiles.ts",
+      "extension": ".ts",
+      "size": 1936,
+      "lines": 72
+    },
+    {
+      "relativePath": "src/scanner/scanWorkspace.ts",
+      "extension": ".ts",
+      "size": 1042,
+      "lines": 41
+    },
+    {
+      "relativePath": "src/types.ts",
+      "extension": ".ts",
+      "size": 984,
+      "lines": 39
+    },
+    {
+      "relativePath": "src/webview/graphRenderer.ts",
+      "extension": ".ts",
+      "size": 1879,
+      "lines": 67
+    },
+    {
+      "relativePath": "src/webview/overviewHtml.ts",
+      "extension": ".ts",
+      "size": 12821,
+      "lines": 260
+    },
+    {
+      "relativePath": "src/webview/overviewPanel.ts",
+      "extension": ".ts",
+      "size": 3469,
+      "lines": 92
+    },
+    {
+      "relativePath": "src/webview/webviewAssets.ts",
+      "extension": ".ts",
+      "size": 16237,
+      "lines": 240
+    },
+    {
+      "relativePath": "tsconfig.json",
+      "extension": ".json",
+      "size": 333,
+      "lines": 19
+    }
+  ],
+  "totals": {
+    "files": 42,
+    "lines": 4399,
+    "size": 161701
+  },
+  "riskSummary": {
+    "total": 0,
+    "low": 0,
+    "medium": 0,
+    "high": 0,
+    "critical": 0
+  }
+}

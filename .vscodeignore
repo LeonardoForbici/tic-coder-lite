@@ -1,0 +1,8 @@
+.vscode/**
+.tic-code/**
+node_modules/**
+src/**
+mockup.html
+*.vsix
+tsconfig.json
+package-lock.json

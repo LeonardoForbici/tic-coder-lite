@@ -1,0 +1,152 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.openOverviewPanel = openOverviewPanel;
+const vscode = __importStar(require("vscode"));
+const analyzeProject_1 = require("../commands/analyzeProject");
+const writeTicCodeFolder_1 = require("../exporters/writeTicCodeFolder");
+const detectEngines_1 = require("../reversa-adapter/detectEngines");
+const overviewHtml_1 = require("./overviewHtml");
+async function openOverviewPanel(context) {
+    const root = (0, analyzeProject_1.getWorkspaceRoot)();
+    if (!root) {
+        vscode.window.showWarningMessage('Abra uma pasta de workspace antes de abrir o TIC Coder Lite.');
+        return;
+    }
+    let summary = (0, analyzeProject_1.getLastAnalysis)(context);
+    if (!summary) {
+        const analyzeLabel = 'Analisar Projeto';
+        const action = await vscode.window.showInformationMessage('Ainda não há análise do Modo Lite. O Modo Lite funciona sem IA, banco, Docker ou servidor.', analyzeLabel);
+        if (action !== analyzeLabel) {
+            return;
+        }
+        summary = await (0, analyzeProject_1.analyzeWorkspace)(root);
+        await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary);
+        await context.globalState.update('ticCoderLite.lastAnalysis', summary);
+    }
+    const panel = vscode.window.createWebviewPanel('ticCoderLiteOverview', 'TIC Coder Lite', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
+    await render(panel, context, root, summary);
+    panel.webview.onDidReceiveMessage(async (message) => {
+        switch (message.command) {
+            case 'analyzeProject':
+                await vscode.commands.executeCommand('ticCoderLite.analyzeProject');
+                summary = (0, analyzeProject_1.getLastAnalysis)(context) ?? await (0, analyzeProject_1.analyzeWorkspace)(root);
+                await render(panel, context, root, summary);
+                break;
+            case 'exportForCodex':
+                await vscode.commands.executeCommand('ticCoderLite.exportForCodex');
+                break;
+            case 'exportForClaude':
+                await vscode.commands.executeCommand('ticCoderLite.exportForClaude');
+                break;
+            case 'exportForCopilot':
+                await vscode.commands.executeCommand('ticCoderLite.exportForCopilot');
+                break;
+            case 'exportForCursor':
+                await vscode.commands.executeCommand('ticCoderLite.exportForCursor');
+                break;
+            case 'exportForGemini':
+                await vscode.commands.executeCommand('ticCoderLite.exportForGemini');
+                break;
+            case 'enhanceLocalAi':
+                await vscode.commands.executeCommand('ticCoderLite.enhanceWithLocalAi');
+                break;
+            case 'setupBeginner':
+                await applyBeginnerSetup();
+                vscode.window.showInformationMessage('TIC Coder Lite: padrão recomendado aplicado. Você já pode usar Analisar Projeto.');
+                break;
+            case 'detectEngines':
+                await vscode.commands.executeCommand('ticCoderLite.detectAiEngines');
+                break;
+            case 'enableLocalAi':
+                await setLocalAiEnabled(true);
+                vscode.window.showInformationMessage('TIC Coder Lite: IA Local ligada. Use Ollama com um modelo pequeno, como qwen2.5-coder:1.5b.');
+                break;
+            case 'disableLocalAi':
+                await setLocalAiEnabled(false);
+                vscode.window.showInformationMessage('TIC Coder Lite: IA Local desligada. O Modo Lite continua funcionando normalmente.');
+                break;
+            case 'openSettings':
+                await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tic.tic-coder-lite');
+                break;
+        }
+    });
+}
+async function applyBeginnerSetup() {
+    const config = vscode.workspace.getConfiguration('ticCoderLite');
+    const target = vscode.ConfigurationTarget.Workspace;
+    await config.update('localAi.enabled', false, target);
+    await config.update('scan.maxFiles', 10000, target);
+    await config.update('scan.maxFileSizeKb', 512, target);
+    await config.update('output.openAfterScan', false, target);
+    await config.update('exports.safeWriteMode', 'ask', target);
+}
+async function setLocalAiEnabled(enabled) {
+    const config = vscode.workspace.getConfiguration('ticCoderLite');
+    await config.update('localAi.enabled', enabled, vscode.ConfigurationTarget.Workspace);
+    if (enabled) {
+        await config.update('localAi.model', 'qwen2.5-coder:1.5b', vscode.ConfigurationTarget.Workspace);
+        await config.update('localAi.ollamaUrl', 'http://localhost:11434', vscode.ConfigurationTarget.Workspace);
+    }
+}
+async function render(panel, context, root, summary) {
+    const engines = await (0, detectEngines_1.detectEngines)(root.uri.fsPath);
+    const agentContextPreview = await readTextIfExists(vscode.Uri.joinPath(root.uri, '.tic-code', 'agent-context.md'));
+    panel.webview.html = (0, overviewHtml_1.renderOverviewHtml)({
+        summary,
+        engines,
+        agentContextPreview: agentContextPreview.slice(0, 2600),
+        nonce: getNonce()
+    });
+    await context.globalState.update('ticCoderLite.lastAnalysis', summary);
+}
+async function readTextIfExists(uri) {
+    try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        return Buffer.from(bytes).toString('utf8');
+    }
+    catch {
+        return '';
+    }
+}
+function getNonce() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let nonce = '';
+    for (let i = 0; i < 32; i += 1) {
+        nonce += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return nonce;
+}
+//# sourceMappingURL=overviewPanel.js.map

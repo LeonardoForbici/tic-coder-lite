@@ -1,0 +1,198 @@
+{
+  "name": "tic-coder-lite",
+  "displayName": "TIC Coder Lite",
+  "description": "Contexto local de código em três modos: Modo Lite sem IA, IA Padrão para exportações e IA Local opcional com Ollama.",
+  "version": "0.0.1",
+  "publisher": "tic",
+  "license": "MIT",
+  "author": "TIC / Leonardo Forbici",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:ticCoderLite.analyzeProject",
+    "onCommand:ticCoderLite.openOverview",
+    "onCommand:ticCoderLite.generateAgentContext",
+    "onCommand:ticCoderLite.exportAgentsMd",
+    "onCommand:ticCoderLite.detectAiEngines",
+    "onCommand:ticCoderLite.exportForCodex",
+    "onCommand:ticCoderLite.exportForClaude",
+    "onCommand:ticCoderLite.exportForCopilot",
+    "onCommand:ticCoderLite.exportForCursor",
+    "onCommand:ticCoderLite.exportForGemini",
+    "onCommand:ticCoderLite.enhanceWithLocalAi",
+    "onView:ticCoderLite.sidebar"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ticCoderLite.analyzeProject",
+        "title": "TIC Coder Lite: Analisar Projeto (Modo Lite)"
+      },
+      {
+        "command": "ticCoderLite.openOverview",
+        "title": "TIC Coder Lite: Abrir Visão dos 3 Modos"
+      },
+      {
+        "command": "ticCoderLite.generateAgentContext",
+        "title": "TIC Coder Lite: Gerar Contexto para IA (Modo Lite)"
+      },
+      {
+        "command": "ticCoderLite.exportAgentsMd",
+        "title": "TIC Coder Lite: Exportar AGENTS.md (IA Padrão)"
+      },
+      {
+        "command": "ticCoderLite.detectAiEngines",
+        "title": "TIC Coder Lite: Detectar Engines de IA (IA Padrão)"
+      },
+      {
+        "command": "ticCoderLite.exportForCodex",
+        "title": "TIC Coder Lite: Exportar para Codex (IA Padrão)"
+      },
+      {
+        "command": "ticCoderLite.exportForClaude",
+        "title": "TIC Coder Lite: Exportar para Claude (IA Padrão)"
+      },
+      {
+        "command": "ticCoderLite.exportForCopilot",
+        "title": "TIC Coder Lite: Exportar para Copilot (IA Padrão)"
+      },
+      {
+        "command": "ticCoderLite.exportForCursor",
+        "title": "TIC Coder Lite: Exportar para Cursor (IA Padrão)"
+      },
+      {
+        "command": "ticCoderLite.exportForGemini",
+        "title": "TIC Coder Lite: Exportar para Gemini (IA Padrão)"
+      },
+      {
+        "command": "ticCoderLite.enhanceWithLocalAi",
+        "title": "TIC Coder Lite: Melhorar com IA Local (Modo IA Local)"
+      }
+    ],
+    "configuration": {
+      "title": "TIC Coder Lite",
+      "properties": {
+        "ticCoderLite.localAi.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ativa melhorias opcionais com IA Local via Ollama. O Modo Lite funciona sem isso."
+        },
+        "ticCoderLite.localAi.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "URL base do Ollama usada apenas para melhoria opcional com IA Local."
+        },
+        "ticCoderLite.localAi.model": {
+          "type": "string",
+          "default": "qwen2.5-coder:1.5b",
+          "description": "Modelo do Ollama para melhoria opcional com IA Local. O TIC Coder Lite nunca baixa modelos automaticamente."
+        },
+        "ticCoderLite.scan.maxFiles": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 1,
+          "description": "Número máximo de arquivos suportados analisados pelo Modo Lite antes de ignorar os demais."
+        },
+        "ticCoderLite.scan.maxFileSizeKb": {
+          "type": "number",
+          "default": 512,
+          "minimum": 1,
+          "description": "Tamanho máximo por arquivo analisado em KB. Arquivos maiores são ignorados para manter o VS Code responsivo."
+        },
+        "ticCoderLite.scan.include": {
+          "type": "array",
+          "default": [
+            "**/*"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Padrões de inclusão aplicados aos arquivos suportados pelo scan."
+        },
+        "ticCoderLite.scan.exclude": {
+          "type": "array",
+          "default": [
+            "**/node_modules/**",
+            "**/.git/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/target/**",
+            "**/coverage/**",
+            "**/.next/**",
+            "**/.idea/**",
+            "**/.vscode/**",
+            "**/.tic-code/**"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Padrões de exclusão para o scan do Modo Lite."
+        },
+        "ticCoderLite.output.openAfterScan": {
+          "type": "boolean",
+          "default": false,
+          "description": "Abre o canal de saída do TIC Coder Lite após um scan concluído."
+        },
+        "ticCoderLite.exports.safeWriteMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "append",
+            "ignore"
+          ],
+          "default": "ask",
+          "description": "Como as exportações de IA Padrão tratam arquivos existentes. Sobrescrever só fica disponível com confirmação explícita."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ticCoderLite",
+          "title": "TIC Coder Lite",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ticCoderLite": [
+        {
+          "id": "ticCoderLite.sidebar",
+          "name": "TIC Coder Lite"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "ticCoderLite.analyzeProject",
+          "when": "view == ticCoderLite.sidebar",
+          "group": "navigation"
+        },
+        {
+          "command": "ticCoderLite.openOverview",
+          "when": "view == ticCoderLite.sidebar",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "tsc -p ./ --noEmit",
+    "package": "vsce package --no-dependencies --allow-missing-repository",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/vscode": "^1.92.0",
+    "@vscode/vsce": "^3.9.1",
+    "typescript": "^5.5.4"
+  }
+}
