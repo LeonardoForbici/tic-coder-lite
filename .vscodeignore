@@ -7,3 +7,5 @@ mockup.html
 tsconfig.json
 package-lock.json
 reversa-main/**
+# resources/reversa/ is intentionally NOT ignored — it is bundled in the extension package
+# so that the Reversa Engine assets (agents/templates/docs) are available at runtime.

@@ -117,7 +117,7 @@ async function applyBeginnerSetup() {
     const config = vscode.workspace.getConfiguration('ticCoderLite');
     const target = vscode.ConfigurationTarget.Workspace;
     await config.update('localAi.enabled', false, target);
-    await config.update('scan.maxFiles', 10000, target);
+    await config.update('scan.maxFiles', 30000, target);
     await config.update('scan.maxFileSizeKb', 512, target);
     await config.update('output.openAfterScan', false, target);
     await config.update('exports.safeWriteMode', 'ask', target);
@@ -126,7 +126,10 @@ async function setLocalAiEnabled(enabled) {
     const config = vscode.workspace.getConfiguration('ticCoderLite');
     await config.update('localAi.enabled', enabled, vscode.ConfigurationTarget.Workspace);
     if (enabled) {
-        await config.update('localAi.model', 'qwen2.5-coder:1.5b', vscode.ConfigurationTarget.Workspace);
+        const currentModel = config.get('localAi.model', '');
+        if (!currentModel) {
+            await config.update('localAi.model', 'qwen2.5-coder:3b', vscode.ConfigurationTarget.Workspace);
+        }
         await config.update('localAi.ollamaUrl', 'http://localhost:11434', vscode.ConfigurationTarget.Workspace);
     }
 }

@@ -422,14 +422,15 @@ function safeJson(value) {
     return JSON.stringify(value).replaceAll('</', '<\\/');
 }
 function renderReversaEngineSection(summary) {
+    const analysisRan = summary.totalFiles > 0;
     const phases = [
-        { id: 'scout', label: 'Scout', icon: '🔍', status: 'completed' },
-        { id: 'archaeologist', label: 'Archaeologist', icon: '⛏️', status: 'partial' },
-        { id: 'detective', label: 'Detective', icon: '🕵️', status: summary.risks.risks.length > 0 ? 'partial' : 'pending' },
-        { id: 'architect', label: 'Architect', icon: '🏗️', status: 'partial' },
-        { id: 'writer', label: 'Writer', icon: '📝', status: 'partial' },
-        { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: 'completed' },
-        { id: 'data-master', label: 'Data Master', icon: '🗄️', status: summary.inventory.plsql.detected ? 'partial' : 'pending' }
+        { id: 'scout', label: 'Scout', icon: '🔍', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'archaeologist', label: 'Archaeologist', icon: '⛏️', status: analysisRan ? 'partial' : 'pending' },
+        { id: 'detective', label: 'Detective', icon: '🕵️', status: summary.risks.risks.length > 0 ? 'partial' : (analysisRan ? 'completed' : 'pending') },
+        { id: 'architect', label: 'Architect', icon: '🏗️', status: analysisRan ? 'partial' : 'pending' },
+        { id: 'writer', label: 'Writer', icon: '📝', status: analysisRan ? 'partial' : 'pending' },
+        { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'data-master', label: 'Data Master', icon: '🗄️', status: summary.inventory.plsql.detected ? 'partial' : (analysisRan ? 'completed' : 'pending') }
     ];
     const statusBadge = (s) => {
         if (s === 'completed')
@@ -438,25 +439,31 @@ function renderReversaEngineSection(summary) {
             return '<span class="badge badge-yellow">🔄 Parcial</span>';
         return '<span class="badge badge-gray">⏳ Pendente</span>';
     };
+    const fileStatus = (generated) => generated
+        ? '<span class="badge badge-green">✅ Gerado</span>'
+        : '<span class="badge badge-gray">⏳ Pendente</span>';
+    const generatedFiles = [
+        { path: '.tic-code/reversa/state.json', icon: '📊', generated: analysisRan },
+        { path: '.tic-code/reversa/config.json', icon: '⚙️', generated: analysisRan },
+        { path: '.tic-code/reversa/plan.md', icon: '📋', generated: analysisRan },
+        { path: '.tic-code/reversa/context/surface.json', icon: '🗺️', generated: analysisRan },
+        { path: '.tic-code/reversa/context/modules.json', icon: '📦', generated: analysisRan },
+        { path: '.tic-code/reversa/context/graph.json', icon: '🕸️', generated: analysisRan },
+        { path: '.tic-code/reversa/context/risks.json', icon: '⚠️', generated: analysisRan },
+        { path: '.tic-code/reverse-engineering/', icon: '📁', generated: analysisRan }
+    ];
     return `<section class="section">
-    <h2>Reversa Engine</h2>
+    <h2>Reversa Engine — TIC Coder Lite</h2>
     <div class="card">
       <p><strong>Motor de programação reversa embutido</strong> — Metodologia Reversa by Sandeco (MIT).</p>
       <p class="caption">Pipeline gera contexto em <code>.tic-code/reversa/</code> e especificações em <code>.tic-code/reverse-engineering/</code></p>
+      <h3>Fases da Metodologia Reversa</h3>
       <div class="phase-grid">
         ${phases.map((p) => `<div class="phase-item"><span>${p.icon}</span><span><strong>${p.label}</strong></span>${statusBadge(p.status)}</div>`).join('\n        ')}
       </div>
+      <h3>Arquivos Gerados</h3>
       <div class="links-grid">
-        <div class="link-item"><span>📋</span> <code>.tic-code/reversa/plan.md</code></div>
-        <div class="link-item"><span>📊</span> <code>.tic-code/reversa/state.json</code></div>
-        <div class="link-item"><span>📁</span> <code>.tic-code/reverse-engineering/</code></div>
-      </div>
-      <h3>JSON Context</h3>
-      <div class="links-grid">
-        <div class="link-item"><span>🗺️</span> <code>surface.json</code></div>
-        <div class="link-item"><span>📦</span> <code>modules.json</code></div>
-        <div class="link-item"><span>🕸️</span> <code>graph.json</code></div>
-        <div class="link-item"><span>⚠️</span> <code>risks.json</code></div>
+        ${generatedFiles.map((f) => `<div class="link-item"><span>${f.icon}</span> <code>${f.path}</code> ${fileStatus(f.generated)}</div>`).join('\n        ')}
       </div>
       <h3>Escala de Confiança</h3>
       <div class="confidence-legend">

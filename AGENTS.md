@@ -68,7 +68,7 @@ Antes de alterar comportamento, leia:
 - Linhas analisadas: 15866
 - Nós do grafo: 83
 - Arestas do grafo: 145
-- Riscos detectados: 6
+- Riscos detectados: 5
 
 ## Stack Detectada
 
@@ -76,7 +76,8 @@ Antes de alterar comportamento, leia:
 
 ## Principais Riscos
 
-- CRITICAL Arquivo tem mais de 1500 linhas: package-lock.json
+> Arquivos de lock, mapas e bundles minificados são excluídos dos riscos de domínio.
+
 - CRITICAL SQL concatenado em string: src/webview/webviewAssets.ts:357
 - CRITICAL SQL concatenado em string: src/webview/webviewAssets.ts:402
 - MEDIUM Uso de any no TypeScript: src/exporters/writeTicCodeFolder.ts:192
