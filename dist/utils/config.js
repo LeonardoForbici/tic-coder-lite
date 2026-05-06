@@ -51,7 +51,7 @@ function getTicCoderLiteConfig() {
     const config = vscode.workspace.getConfiguration('ticCoderLite');
     return {
         scan: {
-            maxFiles: readPositiveNumber(config, 'scan.maxFiles', 10000),
+            maxFiles: readPositiveNumber(config, 'scan.maxFiles', 30000),
             maxFileSizeKb: readPositiveNumber(config, 'scan.maxFileSizeKb', 512),
             include: readStringArray(config, 'scan.include', ['**/*']),
             exclude: readStringArray(config, 'scan.exclude', DEFAULT_EXCLUDE)
@@ -65,7 +65,10 @@ function getTicCoderLiteConfig() {
         localAi: {
             enabled: config.get('localAi.enabled', false),
             ollamaUrl: config.get('localAi.ollamaUrl', 'http://localhost:11434'),
-            model: config.get('localAi.model', 'qwen2.5-coder:1.5b')
+            model: config.get('localAi.model', 'qwen2.5-coder:3b'),
+            fastModel: config.get('localAi.fastModel', 'qwen2.5-coder:3b'),
+            qualityModel: config.get('localAi.qualityModel', 'qwen2.5-coder:7b'),
+            mode: validateMode(config.get('localAi.mode', 'auto'))
         },
         database: {
             largeMode: config.get('database.largeMode', true),
@@ -92,5 +95,8 @@ function readStringArray(config, key, fallback) {
 }
 function readSafeWriteMode(value) {
     return value === 'append' || value === 'ignore' ? value : 'ask';
+}
+function validateMode(value) {
+    return value === 'fast' || value === 'quality' ? value : 'auto';
 }
 //# sourceMappingURL=config.js.map

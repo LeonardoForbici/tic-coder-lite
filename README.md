@@ -1,10 +1,29 @@
-# TIC Coder Lite
+# TIC Coder Lite — Interface VS Code para Reversa Engine
 
-TIC Coder Lite é uma extensão VS Code local-first que ajuda desenvolvedores a entender um workspace antes de pedir para um assistente de IA alterar o código.
+TIC Coder Lite é uma extensão VS Code que fornece uma interface gráfica local-first para o **Reversa Engine** — um motor de programação reversa que transforma sistemas legados em especificações executáveis.
 
-Ele escaneia o projeto aberto, constrói um grafo de arquitetura leve, detecta riscos determinísticos e exporta arquivos de contexto que ferramentas como Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI e modelos Ollama locais podem ler.
+Ele escaneia o projeto aberto, constrói um grafo de arquitetura leve, detecta riscos determinísticos e usa a metodologia de SDD e agentes do Reversa para gerar documentação operacional em `.tic-code/`.
 
-TIC Coder Lite está preparado para demos locais e futuro empacotamento `.vsix`. Ainda não é publicado no Marketplace.
+O contexto gerado pode ser exportado para ferramentas como Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI e modelos Ollama locais.
+
+TIC Coder Lite está preparado para demos locais e empacotamento `.vsix`. Ainda não é publicado no Marketplace.
+
+## O que é o Reversa Engine?
+
+O Reversa Engine (adaptado de Reversa by Sandeco, MIT) é uma metodologia de programação reversa com:
+
+- **7 Agentes de IA**: Scout, Archaeologist, Detective, Architect, Writer, Reviewer, Data Master
+- **Escala de Confiança**: 🟢 CONFIRMADO, 🟡 INFERIDO, 🔴 LACUNA
+- **Especificações Executáveis**: SDD (Sistema de Documentação de Domínio)
+- **Contratos Operacionais**: Regras extraídas, permissões, fluxos, SQL/PL-SQL
+- **Rastreabilidade**: Matriz código ↔ spec, impacto de riscos
+
+## TIC Coder Lite ≠ Reversa CLI
+
+- **Reversa CLI**: Executável `npx reversa` — standalone reverse engineering tool
+- **TIC Coder Lite**: Extensão VS Code — interface gráfica que **usa o Reversa Engine como motor**
+
+TIC Coder Lite não instala, executa ou depende do Reversa CLI. Ele **incorpora os agentes, templates e metodologia** do Reversa como um motor embutido.
 
 ## Capturas de Tela
 
@@ -132,40 +151,75 @@ Os logs são escritos no Canal de Saída denominado `TIC Coder Lite`.
 
 ## Programação Reversa / SDD
 
-TIC Coder Lite agora inclui uma camada de **Programação Reversa** local-first, inspirada metodologicamente no [Reversa by Sandeco (MIT)](https://github.com/sandeco/reversa).
+TIC Coder Lite usa o **motor Reversa embutido** como base completa de programação reversa. O Reversa by Sandeco (MIT) é incorporado em `resources/reversa/` e adaptado para funcionar como extensão VS Code.
 
-O objetivo é transformar código existente em especificações técnicas, contratos operacionais, regras candidatas, gaps e rastreabilidade prontos para agentes de IA — tudo sem IA obrigatória, banco, Docker ou servidor.
+**TIC Coder Lite NÃO é o Reversa CLI.** É uma extensão VS Code que usa o motor/metodologia do Reversa adaptado internamente.
 
-### O que é gerado
-
-Ao executar "Analisar Workspace", o TIC Coder Lite gera automaticamente:
+### Saída principal
 
 ```
-.tic-code/
-└── reverse-engineering/
-    ├── inventory.md          — inventário completo (Scout)
-    ├── dependencies.md       — dependências externas e internas
-    ├── code-analysis.md      — módulos, controllers, services (Archaeologist)
-    ├── domain.md             — candidatos de domínio de negócio (Detective)
-    ├── business-rules.md     — regras de negócio candidatas (Detective)
-    ├── state-machines.md     — máquinas de estado + Mermaid (Detective)
-    ├── permissions.md        — permissões @PreAuthorize, hasRole (Detective)
-    ├── architecture.md       — arquitetura, C4 simplificado (Architect)
-    ├── api-contracts.md      — contratos de API REST (Writer)
-    ├── data-dictionary.md    — dicionário de dados (Data Master)
-    ├── database-analysis.md  — tabelas, migrations, SQL (Data Master)
-    ├── plsql-analysis.md     — packages, procedures, triggers (Data Master)
-    ├── confidence-report.md  — relatório de confiança (Reviewer)
-    ├── gaps.md               — lacunas e incertezas (Reviewer)
-    ├── questions.md          — perguntas para validação humana (Reviewer)
-    └── traceability/
-        ├── code-spec-matrix.md   — código ↔ spec ↔ confiança
-        └── risk-impact-matrix.md — risco ↔ módulo ↔ impacto
+.tic-code/reversa/              — estado do motor Reversa
+├── state.json                  — fases, checkpoints, status
+├── config.json                 — configuração da análise
+├── plan.md                     — plano de programação reversa
+├── version                     — versão do motor
+├── context/
+│   ├── surface.json            — mapeamento de superfície
+│   ├── modules.json            — módulos detectados
+│   ├── graph.json              — grafo de dependências
+│   ├── risks.json              — riscos detectados
+│   └── workspace-summary.json  — resumo compacto
+└── _config/
+    ├── manifest.yaml           — configuração do motor
+    └── sdd-template.md         — template SDD
+
+.tic-code/reverse-engineering/  — especificações extraídas (equivalente ao _reversa_sdd/)
+├── inventory.md                — inventário (Scout)
+├── dependencies.md             — dependências
+├── code-analysis.md            — módulos e acoplamento (Archaeologist)
+├── data-dictionary.md          — dicionário de dados
+├── domain.md                   — domínio (Detective)
+├── state-machines.md           — máquinas de estado
+├── permissions.md              — permissões e papéis
+├── business-rules.md           — regras de negócio candidatas
+├── operational-contracts.md    — contratos operacionais por módulo
+├── architecture.md             — arquitetura (Architect)
+├── c4-context.md               — diagrama C4 contexto
+├── c4-containers.md            — diagrama C4 containers
+├── c4-components.md            — diagrama C4 componentes
+├── erd-complete.md             — ERD completo
+├── confidence-report.md        — relatório de confiança (Reviewer)
+├── gaps.md                     — lacunas 🔴
+├── questions.md                — perguntas para validação humana
+├── dynamic.md                  — análise dinâmica
+├── sdd/                        — specs detalhadas por componente
+├── openapi/                    — contratos OpenAPI
+├── user-stories/               — user stories
+├── adrs/                       — Architecture Decision Records
+├── flowcharts/                 — diagramas de fluxo
+├── sequences/                  — diagramas de sequência
+├── ui/                         — specs de interface
+├── database/                   — análise de banco
+├── design-system/              — design system
+└── traceability/
+    ├── code-spec-matrix.md     — código ↔ spec
+    ├── risk-impact-matrix.md   — risco ↔ impacto
+    └── spec-impact-matrix.md   — spec ↔ componentes
 ```
 
-E, para cada subprojeto detectado, em `.tic-code/projects/{projectId}/reverse-engineering/`.
+### Pipeline Reversa Engine
 
-### Níveis de Confiança
+| Fase | Agente | Tipo |
+| --- | --- | --- |
+| **Scout** | reversa-scout | ✅ Determinístico |
+| **Archaeologist** | reversa-archaeologist | 🔄 Parcial |
+| **Detective** | reversa-detective | ⏳ Requer IA |
+| **Architect** | reversa-architect | 🔄 Parcial |
+| **Writer** | reversa-writer | 🔄 Parcial |
+| **Reviewer** | reversa-reviewer | ✅ Determinístico |
+| **Data Master** | reversa-data-master | 🔄 Se PL/SQL detectado |
+
+### Escala de Confiança (Reversa)
 
 Toda afirmação gerada é marcada com um dos seguintes níveis:
 
@@ -472,3 +526,15 @@ InsightGraph was used as an internal conceptual reference for local scan/analyze
 ## License
 
 MIT. See `LICENSE` and `NOTICE.md`.
+
+## Fluxo Reversa Engine (12 agentes)
+
+O TIC Coder Lite opera como **UI VS Code do Reversa Engine** com 12 agentes: Reversa, Scout, Archaeologist, Detective, Architect, Writer, Reviewer, Tracer, Visor, Data Master, Design System e Chronicler.
+
+- **Tracer** exige importação de logs/traces (`.log`, `.txt`, `.json`, `.ndjson`) para gerar `dynamic.md` e `runtime-evidence.md`.
+- **Visor** exige importação de screenshots (`.png`, `.jpg`, `.jpeg`, `.webp`) para gerar `screenshots-index.md`, `ui-analysis.md` e `user-flows.md`.
+- **Design System** analisa CSS/SCSS/themes quando existirem; se não houver, gera artefatos com 🔴 LACUNA.
+- **Chronicler** registra sessões de análise e changelog.
+- **status pending** = aguardando input.
+- **status completed** = artefatos gerados.
+- Não existe status `partial` ou `skipped` no estado dos agentes.

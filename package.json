@@ -1,7 +1,7 @@
 {
   "name": "tic-coder-lite",
   "displayName": "TIC Coder Lite",
-  "description": "Contexto local de código em três modos: Modo Lite sem IA, IA Padrão para exportações e IA Local opcional com Ollama.",
+  "description": "VS Code interface for Reversa Engine — transform legacy systems into executable specifications using reverse engineering.",
   "version": "0.0.1",
   "publisher": "tic",
   "license": "MIT",
@@ -61,6 +61,14 @@
       {
         "command": "ticCoderLite.enhanceWithLocalAi",
         "title": "TIC Coder Lite: Melhorar com IA Local (Modo IA Local)"
+      },
+      {
+        "command": "ticCoderLite.importTracerInputs",
+        "title": "TIC Coder Lite: Importar Logs/Traces para Tracer"
+      },
+      {
+        "command": "ticCoderLite.importVisorScreenshots",
+        "title": "TIC Coder Lite: Importar Screenshots para Visor"
       }
     ],
     "configuration": {
@@ -93,7 +101,11 @@
         },
         "ticCoderLite.localAi.mode": {
           "type": "string",
-          "enum": ["auto", "fast", "quality"],
+          "enum": [
+            "auto",
+            "fast",
+            "quality"
+          ],
           "enumDescriptions": [
             "Seleção automática: fastModel para tarefas simples, qualityModel para tarefas complexas.",
             "Usa sempre fastModel independentemente da tarefa.",
@@ -104,7 +116,7 @@
         },
         "ticCoderLite.scan.maxFiles": {
           "type": "number",
-          "default": 10000,
+          "default": 30000,
           "minimum": 1,
           "description": "Número máximo de arquivos suportados analisados pelo Modo Lite antes de ignorar os demais."
         },

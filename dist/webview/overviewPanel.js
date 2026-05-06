@@ -59,10 +59,10 @@ async function openOverviewPanel(context) {
             return;
         }
         summary = newSummary;
-        await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary);
+        await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary, context.extensionUri);
         await context.globalState.update('ticCoderLite.lastAnalysis', summary);
     }
-    const panel = vscode.window.createWebviewPanel('ticCoderLiteOverview', 'TIC Coder Lite', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
+    const panel = vscode.window.createWebviewPanel('ticCoderLiteOverview', 'Reversa Engine — TIC Coder Lite', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
     await render(panel, context, root, summary);
     panel.webview.onDidReceiveMessage(async (message) => {
         switch (message.command) {
@@ -101,11 +101,17 @@ async function openOverviewPanel(context) {
                 break;
             case 'enableLocalAi':
                 await setLocalAiEnabled(true);
-                vscode.window.showInformationMessage('TIC Coder Lite: IA Local ligada. Use Ollama com um modelo pequeno, como qwen2.5-coder:1.5b.');
+                vscode.window.showInformationMessage('TIC Coder Lite: IA Local ligada. Use Ollama com um modelo pequeno, como qwen2.5-coder:3b.');
                 break;
             case 'disableLocalAi':
                 await setLocalAiEnabled(false);
                 vscode.window.showInformationMessage('TIC Coder Lite: IA Local desligada. O Modo Lite continua funcionando normalmente.');
+                break;
+            case 'importTracerInputs':
+                await vscode.commands.executeCommand('ticCoderLite.importTracerInputs');
+                break;
+            case 'importVisorScreenshots':
+                await vscode.commands.executeCommand('ticCoderLite.importVisorScreenshots');
                 break;
             case 'openSettings':
                 await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tic.tic-coder-lite');
@@ -117,7 +123,7 @@ async function applyBeginnerSetup() {
     const config = vscode.workspace.getConfiguration('ticCoderLite');
     const target = vscode.ConfigurationTarget.Workspace;
     await config.update('localAi.enabled', false, target);
-    await config.update('scan.maxFiles', 10000, target);
+    await config.update('scan.maxFiles', 30000, target);
     await config.update('scan.maxFileSizeKb', 512, target);
     await config.update('output.openAfterScan', false, target);
     await config.update('exports.safeWriteMode', 'ask', target);
@@ -126,7 +132,10 @@ async function setLocalAiEnabled(enabled) {
     const config = vscode.workspace.getConfiguration('ticCoderLite');
     await config.update('localAi.enabled', enabled, vscode.ConfigurationTarget.Workspace);
     if (enabled) {
-        await config.update('localAi.model', 'qwen2.5-coder:1.5b', vscode.ConfigurationTarget.Workspace);
+        const currentModel = config.get('localAi.model', '');
+        if (!currentModel) {
+            await config.update('localAi.model', 'qwen2.5-coder:3b', vscode.ConfigurationTarget.Workspace);
+        }
         await config.update('localAi.ollamaUrl', 'http://localhost:11434', vscode.ConfigurationTarget.Workspace);
     }
 }

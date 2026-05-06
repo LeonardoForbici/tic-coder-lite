@@ -46,7 +46,7 @@ function renderOverviewHtml(input) {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TIC Coder Lite</title>
+  <title>Reversa Engine — TIC Coder Lite</title>
   <style nonce="${nonce}">${(0, webviewAssets_1.getOverviewStyles)()}</style>
 </head>
 <body>
@@ -54,9 +54,9 @@ function renderOverviewHtml(input) {
   <main class="page">
     <header class="header">
       <div>
-        <h1>TIC Coder Lite</h1>
+        <h1>Reversa Engine — TIC Coder Lite</h1>
+        <p class="muted">Interface gráfica VS Code para programação reversa</p>
         <p class="muted">Workspace: <strong>${escapeHtml(summary.workspaceName)}</strong></p>
-        <p class="muted">Entenda seu workspace antes de pedir para a IA alterar o código.</p>
       </div>
       <div class="actions">
         <button class="btn primary" data-command="analyzeProject">⚡ Analisar Workspace</button>
@@ -97,6 +97,8 @@ function renderOverviewHtml(input) {
       ${metric('Engines de IA', detectedEngines.length)}
       ${metric('Database / PL/SQL', plsql.files.length)}
     </section>
+
+    ${renderReversaEngineSection(summary)}
 
     <section class="section">
       <h2>Configuração Fácil</h2>
@@ -418,6 +420,62 @@ function riskLabel(value) {
 }
 function safeJson(value) {
     return JSON.stringify(value).replaceAll('</', '<\\/');
+}
+function renderReversaEngineSection(summary) {
+    const analysisRan = summary.totalFiles > 0;
+    const phases = [
+        { id: 'reversa', label: 'Reversa', icon: '🧭', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'scout', label: 'Scout', icon: '🔍', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'archaeologist', label: 'Archaeologist', icon: '⛏️', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'detective', label: 'Detective', icon: '🕵️', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'architect', label: 'Architect', icon: '🏗️', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'writer', label: 'Writer', icon: '📝', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'tracer', label: 'Tracer', icon: '📈', status: 'pending', executionMode: 'user-input', requiredInputs: ['logs/traces .log/.txt/.json/.ndjson'], generatedFiles: ['dynamic.md', 'runtime-evidence.md'] },
+        { id: 'visor', label: 'Visor', icon: '🖼️', status: 'pending', executionMode: 'user-input', requiredInputs: ['screenshots .png/.jpg/.jpeg/.webp'], generatedFiles: ['screenshots-index.md', 'ui-analysis.md', 'user-flows.md'] },
+        { id: 'data-master', label: 'Data Master', icon: '🗄️', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'design-system', label: 'Design System', icon: '🎨', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'chronicler', label: 'Chronicler', icon: '📚', status: analysisRan ? 'completed' : 'pending', executionMode: 'deterministic', requiredInputs: [], generatedFiles: ['session.md', 'history.json', 'changelog.md'] }
+    ];
+    const statusBadge = (s) => {
+        if (s === 'completed')
+            return '<span class="badge badge-green">✅ Executado</span>';
+        return '<span class="badge badge-gray">⏳ Pendente</span>';
+    };
+    const fileStatus = (generated) => generated
+        ? '<span class="badge badge-green">✅ Gerado</span>'
+        : '<span class="badge badge-gray">⏳ Pendente</span>';
+    const generatedFiles = [
+        { path: '.tic-code/reversa/state.json', icon: '📊', generated: analysisRan },
+        { path: '.tic-code/reversa/config.json', icon: '⚙️', generated: analysisRan },
+        { path: '.tic-code/reversa/plan.md', icon: '📋', generated: analysisRan },
+        { path: '.tic-code/reversa/context/surface.json', icon: '🗺️', generated: analysisRan },
+        { path: '.tic-code/reversa/context/modules.json', icon: '📦', generated: analysisRan },
+        { path: '.tic-code/reversa/context/graph.json', icon: '🕸️', generated: analysisRan },
+        { path: '.tic-code/reversa/context/risks.json', icon: '⚠️', generated: analysisRan },
+        { path: '.tic-code/reverse-engineering/', icon: '📁', generated: analysisRan }
+    ];
+    return `<section class="section">
+    <h2>Reversa Engine — TIC Coder Lite</h2>
+    <div class="card">
+      <p><strong>Motor de programação reversa embutido</strong> — Metodologia Reversa by Sandeco (MIT).</p>
+      <p class="caption">Pipeline gera contexto em <code>.tic-code/reversa/</code> e especificações em <code>.tic-code/reverse-engineering/</code></p>
+      <h3>Fases da Metodologia Reversa</h3>
+      <div class="phase-grid">
+        ${phases.map((p) => `<div class="phase-item"><span>${p.icon}</span><span><strong>${p.label}</strong></span>${statusBadge(p.status)}<div class="caption">Modo: ${p.executionMode ?? 'deterministic'}</div><div class="caption">Inputs: ${(p.requiredInputs ?? []).join(', ') || 'nenhum'}</div><div class="caption">Arquivos: ${(p.generatedFiles ?? []).join(', ') || 'n/a'}</div>${p.id === 'tracer' ? '<button class=\"btn\" data-command=\"importTracerInputs\">Importar Logs/Traces</button>' : ''}${p.id === 'visor' ? '<button class=\"btn\" data-command=\"importVisorScreenshots\">Importar Screenshots</button>' : ''}</div>`).join('\n        ')}
+      </div>
+      <h3>Arquivos Gerados</h3>
+      <div class="links-grid">
+        ${generatedFiles.map((f) => `<div class="link-item"><span>${f.icon}</span> <code>${f.path}</code> ${fileStatus(f.generated)}</div>`).join('\n        ')}
+      </div>
+      <h3>Escala de Confiança</h3>
+      <div class="confidence-legend">
+        <span class="badge badge-green">🟢 CONFIRMADO</span>
+        <span class="badge badge-yellow">🟡 INFERIDO</span>
+        <span class="badge badge-red">🔴 LACUNA</span>
+      </div>
+    </div>
+  </section>`;
 }
 function escapeHtml(value) {
     return value

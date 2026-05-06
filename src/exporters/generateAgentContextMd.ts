@@ -1,6 +1,7 @@
 import type { GraphNode, LightweightGraph } from '../scanner/buildGraph';
 import type { RiskFinding } from '../scanner/detectRisks';
 import type { ProjectSummary } from '../types';
+import { classifyFileToModule } from './reverseEngineering/generateCodeAnalysis';
 
 export function generateAgentContextMd(summary: ProjectSummary): string {
   const stack = summary.inventory.stack
@@ -68,7 +69,7 @@ Este arquivo é um contexto operacional para Codex, Claude Code, Copilot, Cursor
 
 1. Modo Lite: scanner determinístico, grafo, riscos e contexto. Sem IA, sem banco, sem Docker e sem servidor.
 2. IA Padrão: exporta contexto para ferramentas de IA existentes. Codex usa AGENTS.md, Claude Code usa CLAUDE.md, Copilot usa .github/copilot-instructions.md, Cursor usa .cursorrules, Gemini usa GEMINI.md.
-3. IA Local: melhoria opcional com Ollama. Modelo inicial recomendado: qwen2.5-coder:1.5b. Pode ser desativada e não exige modelos grandes de 60GB.
+3. IA Local: melhoria opcional com Ollama. Modelo inicial recomendado: qwen2.5-coder:3b. Pode ser desativada e não exige modelos grandes de 60GB.
 
 ## Stack Detectada
 
@@ -155,6 +156,7 @@ Antes de alterar código, leia também:
 
 - .tic-code/reverse-engineering/inventory.md
 - .tic-code/reverse-engineering/architecture.md
+- .tic-code/reverse-engineering/operational-contracts.md
 - .tic-code/reverse-engineering/business-rules.md
 - .tic-code/reverse-engineering/confidence-report.md
 - .tic-code/reverse-engineering/gaps.md
@@ -198,7 +200,13 @@ function findCriticalModules(summary: ProjectSummary): Array<{ module: string; r
   const nodeByPath = new Map(summary.graph.nodes.map((node) => [node.path, node]));
 
   for (const risk of summary.risks.risks) {
-    const module = nodeByPath.get(risk.file)?.module ?? 'unknown';
+    // Excluir lock files — não são módulos de domínio
+    const lower = risk.file.toLowerCase();
+    if (lower.endsWith('package-lock.json') || lower.endsWith('yarn.lock') || lower.endsWith('pnpm-lock.yaml')) continue;
+    const graphModule = nodeByPath.get(risk.file)?.module;
+    const module = (graphModule && graphModule !== 'unknown' && graphModule !== 'external')
+      ? graphModule
+      : classifyFileToModule(risk.file).name;
     const weight = risk.level === 'critical' ? 4 : risk.level === 'high' ? 3 : risk.level === 'medium' ? 2 : 1;
     riskByModule.set(module, (riskByModule.get(module) ?? 0) + weight);
   }
@@ -221,7 +229,15 @@ function findCriticalModules(summary: ProjectSummary): Array<{ module: string; r
 
 function findHighRiskFiles(summary: ProjectSummary): Array<{ file: string; reason: string }> {
   const fromRisks = summary.risks.risks
-    .filter((risk) => risk.level === 'critical' || risk.level === 'high')
+    .filter((risk) => {
+      const lower = risk.file.toLowerCase();
+      return (
+        (risk.level === 'critical' || risk.level === 'high') &&
+        !lower.endsWith('package-lock.json') &&
+        !lower.endsWith('yarn.lock') &&
+        !lower.endsWith('pnpm-lock.yaml')
+      );
+    })
     .map((risk: RiskFinding) => ({ file: risk.file, reason: `risco ${risk.level}: ${risk.title}` }));
 
   const fromGraph = summary.graph.nodes
