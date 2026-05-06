@@ -256,14 +256,24 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
         <div class="two-column">
           <div>
             <label class="caption">URL da tela</label>
-            <input class="db-search-input" type="text" placeholder="/clientes/123" style="width:100%;margin:6px 0 10px">
+            <input id="impactUrl" class="db-search-input" type="text" placeholder="/clientes/123" style="width:100%;margin:6px 0 10px">
             <label class="caption">Descrição da mudança desejada</label>
-            <textarea placeholder="Ex: adicionar validação de limite de crédito" style="width:100%;min-height:84px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+            <textarea id="impactChangeDescription" placeholder="Ex: adicionar validação de limite de crédito" style="width:100%;min-height:84px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+            <input id="impactScreenName" class="db-search-input" type="text" placeholder="Nome da tela (opcional)" style="width:100%;margin:6px 0 10px">
+            <input id="impactVisibleTerms" class="db-search-input" type="text" placeholder="Palavras visíveis (opcional)" style="width:100%;margin:6px 0 10px">
+            <input id="impactMainAction" class="db-search-input" type="text" placeholder="Ação principal (opcional)" style="width:100%;margin:6px 0 10px">
+            <input id="impactTargetElement" class="db-search-input" type="text" placeholder="Elemento alvo (opcional)" style="width:100%;margin:6px 0 10px">
+            <input id="impactTargetField" class="db-search-input" type="text" placeholder="Campo alvo (opcional)" style="width:100%;margin:6px 0 10px">
+            <input id="impactTargetRule" class="db-search-input" type="text" placeholder="Regra alvo (opcional)" style="width:100%;margin:6px 0 10px">
             <div class="actions" style="justify-content:flex-start;margin-top:10px">
-              <button class="btn primary" data-command="analyzeImpactByScreen">Analisar Impacto</button>
-              <button class="btn" data-command="importScreenForImpact">Importar Screenshot</button>
+              <button class="btn primary" data-command="analyzeImpactByImage">Analisar Impacto</button>
+              <button class="btn" data-command="importImpactScreenshot">Importar Screenshot</button>
+              <button class="btn" data-command="openImpactReport">Abrir relatório</button>
+              <button class="btn" data-command="estimateChangeCostWithLocalAi">Estimar com IA Local</button>
+              <button class="btn" data-command="exportChangePackageForPaidAi">Exportar para IA Paga</button>
               <button class="btn" data-command="openImpactReport">Abrir relatório</button>
               <button class="btn" data-command="openImpactJson">Abrir JSON</button>
+              <button class="btn" data-command="openFilesToEdit">Abrir arquivos para edição</button>
             </div>
           </div>
           <div class="detail">

@@ -35,7 +35,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ticCoderLite.enhanceWithLocalAi', () => enhanceWithLocalAi())
     ,vscode.commands.registerCommand('ticCoderLite.importTracerInputs', () => importTracerInputsCommand())
     ,vscode.commands.registerCommand('ticCoderLite.importVisorScreenshots', () => importVisorScreenshotsCommand())
-    ,vscode.commands.registerCommand('ticCoderLite.analyzeImpactByImage', () => analyzeImpactByImageCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.analyzeImpactByImage', (payload) => analyzeImpactByImageCommand(payload))
     ,vscode.commands.registerCommand('ticCoderLite.importImpactScreenshot', () => importImpactScreenshotCommand())
     ,vscode.commands.registerCommand('ticCoderLite.estimateChangeCostWithLocalAi', () => estimateChangeCostWithLocalAiCommand())
     ,vscode.commands.registerCommand('ticCoderLite.exportChangePackageForPaidAi', () => exportChangePackageForPaidAiCommand())
