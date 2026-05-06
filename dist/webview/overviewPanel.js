@@ -72,7 +72,9 @@ async function openOverviewPanel(context) {
                 const latestAnalysis = (0, analyzeProject_1.getLastAnalysis)(context);
                 if (latestAnalysis) {
                     summary = latestAnalysis;
-                    await render(panel, context, root, summary);
+                    if (summary) {
+                        await render(panel, context, root, summary);
+                    }
                 }
                 break;
             case 'exportForCodex':
@@ -115,11 +117,26 @@ async function openOverviewPanel(context) {
             case 'importVisorScreenshots':
                 await vscode.commands.executeCommand('ticCoderLite.importVisorScreenshots');
                 break;
-            case 'analyzeImpactByScreen':
-                await vscode.commands.executeCommand('ticCoderLite.analyzeImpactByScreen');
+            case 'analyzeImpactByImage':
+                await vscode.commands.executeCommand('ticCoderLite.analyzeImpactByImage', message.payload);
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
                 break;
-            case 'importScreenForImpact':
-                await vscode.commands.executeCommand('ticCoderLite.importScreenForImpact');
+            case 'importImpactScreenshot':
+                await vscode.commands.executeCommand('ticCoderLite.importImpactScreenshot');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'estimateChangeCostWithLocalAi':
+                await vscode.commands.executeCommand('ticCoderLite.estimateChangeCostWithLocalAi');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'exportChangePackageForPaidAi':
+                await vscode.commands.executeCommand('ticCoderLite.exportChangePackageForPaidAi');
                 break;
             case 'openTicCodeFolder':
                 await openFolder(vscode.Uri.joinPath(root.uri, '.tic-code'));
@@ -133,10 +150,16 @@ async function openOverviewPanel(context) {
                 }
                 break;
             case 'openImpactReport':
-                await openFileFromWorkspace(root, '.tic-code/impact/screen-impact.md');
+                await openFileFromWorkspace(root, '.tic-code/impact/latest-screen-impact.md');
                 break;
             case 'openImpactJson':
-                await openFileFromWorkspace(root, '.tic-code/impact/screen-impact.json');
+                await openFileFromWorkspace(root, '.tic-code/impact/latest-screen-impact.json');
+                break;
+            case 'openFilesToEdit':
+                await openFileFromWorkspace(root, '.tic-code/impact/screens/' + (message.latestScreenId || '') + '/files-to-edit.md');
+                break;
+            case 'openAiChangePackage':
+                await openFileFromWorkspace(root, '.tic-code/impact/latest-ai-change-package.md');
                 break;
             case 'openSettings':
                 await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tic.tic-coder-lite');

@@ -12,3 +12,15 @@ export async function writeScreenInput(root: vscode.WorkspaceFolder, input: Scre
   await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(input, null, 2), 'utf8'));
   return uri;
 }
+
+export async function writeLatestScreenInput(root: vscode.WorkspaceFolder, input: ScreenImpactInput): Promise<void> {
+  const latest = {
+    screenId: input.id,
+    screenshotPath: input.screenshotPath,
+    screenshotFileName: input.screenshotFileName,
+    createdAt: input.createdAt
+  };
+  const uri = vscode.Uri.joinPath(root.uri, '.tic-code', 'impact', 'latest-screen-input.json');
+  await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(root.uri, '.tic-code', 'impact'));
+  await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(latest, null, 2), 'utf8'));
+}

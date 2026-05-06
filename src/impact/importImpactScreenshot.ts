@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { normalizeRoute } from './routeMatcher';
 import { buildScreenFingerprint } from './screenFingerprint';
 import { ScreenImpactInput } from './impactTypes';
-import { getScreenDir, writeScreenInput } from './screenInputStore';
+import { getScreenDir, writeLatestScreenInput, writeScreenInput } from './screenInputStore';
 
 export async function importImpactScreenshotCommand(): Promise<ScreenImpactInput | undefined> {
   const root = vscode.workspace.workspaceFolders?.[0]; if (!root) return;
@@ -25,6 +25,7 @@ export async function importImpactScreenshotCommand(): Promise<ScreenImpactInput
   await vscode.workspace.fs.writeFile(dest, await vscode.workspace.fs.readFile(pick[0]));
   const input: ScreenImpactInput = { id, url, normalizedRoute: url ? normalizeRoute(url) : undefined, screenshotPath: dest.fsPath, screenshotFileName: fileName, changeDescription, userHints, createdAt: new Date().toISOString() };
   await writeScreenInput(root, input);
+  await writeLatestScreenInput(root, input);
   const fingerprint = buildScreenFingerprint(input);
   await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(dir, 'screen-fingerprint.json'), Buffer.from(JSON.stringify(fingerprint, null, 2), 'utf8'));
   return input;

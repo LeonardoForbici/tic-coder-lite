@@ -646,7 +646,24 @@ function getOverviewScript(nonce) {
     }
 
     document.querySelectorAll('.mode').forEach((el) => el.addEventListener('click', () => setMode(el.dataset.mode)));
-    document.querySelectorAll('[data-command]').forEach((el) => el.addEventListener('click', () => post(el.dataset.command)));
+    document.querySelectorAll('[data-command]').forEach((el) => el.addEventListener('click', () => {
+      const command = el.dataset.command;
+      if (command === 'analyzeImpactByImage') {
+        const payload = {
+          url: $('impactUrl')?.value || '',
+          changeDescription: $('impactChangeDescription')?.value || '',
+          screenName: $('impactScreenName')?.value || '',
+          visibleTerms: (($('impactVisibleTerms')?.value || '').split(',').map((x) => x.trim()).filter(Boolean)),
+          mainAction: $('impactMainAction')?.value || '',
+          targetElement: $('impactTargetElement')?.value || '',
+          targetField: $('impactTargetField')?.value || '',
+          targetRule: $('impactTargetRule')?.value || ''
+        };
+        post(command, { payload });
+        return;
+      }
+      post(command);
+    }));
     $('zoomIn').addEventListener('click', () => { graphState.zoom = Math.min(2.8, graphState.zoom + 0.18); renderGraph(); });
     $('zoomOut').addEventListener('click', () => { graphState.zoom = Math.max(0.25, graphState.zoom - 0.18); renderGraph(); });
     $('fitGraph').addEventListener('click', fitGraph);
