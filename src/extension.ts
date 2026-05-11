@@ -11,6 +11,10 @@ import { analyzeImpactByImageCommand } from './impact/analyzeImpactByImage';
 import { importImpactScreenshotCommand } from './impact/importImpactScreenshot';
 import { estimateChangeCostWithLocalAiCommand } from './impact/changeCostEstimator';
 import { exportChangePackageForPaidAiCommand } from './impact/exportChangePackageForPaidAi';
+import { generateLegacyAntibodiesCommand } from './change-firewall/legacyAntibodyGenerator';
+import { exportAiReviewPromptCommand, openChangeFirewallReportCommand, openLegacyAntibodiesCommand } from './change-firewall/generateChangeSafetyReport';
+import { runChangeFirewallOnGitDiffCommand, runChangeTwinCommand } from './change-firewall/runChangeTwin';
+import { generateChangeApprovalPackCommand, openChangeApprovalPackCommand } from './change-firewall/generateChangeApprovalPack';
 import { ProjectSummary } from './types';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -39,6 +43,14 @@ export function activate(context: vscode.ExtensionContext): void {
     ,vscode.commands.registerCommand('ticCoderLite.importImpactScreenshot', () => importImpactScreenshotCommand())
     ,vscode.commands.registerCommand('ticCoderLite.estimateChangeCostWithLocalAi', () => estimateChangeCostWithLocalAiCommand())
     ,vscode.commands.registerCommand('ticCoderLite.exportChangePackageForPaidAi', () => exportChangePackageForPaidAiCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.runChangeTwin', () => runChangeTwinCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.generateLegacyAntibodies', () => generateLegacyAntibodiesCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.runChangeFirewallOnGitDiff', () => runChangeFirewallOnGitDiffCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.openChangeFirewallReport', () => openChangeFirewallReportCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.openLegacyAntibodies', () => openLegacyAntibodiesCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.exportAiReviewPrompt', () => exportAiReviewPromptCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.generateChangeApprovalPack', () => generateChangeApprovalPackCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.openChangeApprovalPack', () => openChangeApprovalPackCommand())
   );
 }
 
@@ -82,6 +94,8 @@ class TicCoderLiteTreeProvider implements vscode.TreeDataProvider<TicCoderLiteIt
       commandItem('IA Local: Melhorar com Ollama', 'ticCoderLite.enhanceWithLocalAi', 'Usar Ollama opcional com modelo pequeno para melhorar o contexto .tic-code'),
       commandItem('IA Padrão: Exportar AGENTS.md', 'ticCoderLite.exportAgentsMd', 'Gravar ou atualizar AGENTS.md'),
       commandItem('Impacto por Imagem/Tela: Analisar', 'ticCoderLite.analyzeImpactByImage', 'Mapear frontend → backend → SQL/PLSQL por URL de tela'),
+      commandItem('AI Change Firewall: Simular Mudanca', 'ticCoderLite.runChangeTwin', 'Gerar Change Twin sem alterar codigo'),
+      commandItem('AI Change Firewall: Validar Diff', 'ticCoderLite.runChangeFirewallOnGitDiff', 'Cruzar diff local com regras, contratos e antibodies'),
       summaryItem(summary)
     ];
   }

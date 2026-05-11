@@ -6,6 +6,7 @@ import { detectEngines } from '../reversa-adapter/detectEngines';
 import type { ProjectSummary } from '../types';
 import { renderOverviewHtml } from './overviewHtml';
 import type { FileEditCandidate, ScreenImpactInput, ScreenImpactResult } from '../impact/impactTypes';
+import type { ChangeApprovalPack, ChangeSafetyReport, ChangeTwinResult, LegacyAntibody } from '../change-firewall/changeFirewallTypes';
 
 export async function openOverviewPanel(context: vscode.ExtensionContext): Promise<void> {
   const root = getWorkspaceRoot();
@@ -116,6 +117,34 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
       case 'exportChangePackageForPaidAi':
         await vscode.commands.executeCommand('ticCoderLite.exportChangePackageForPaidAi');
         break;
+      case 'runChangeTwin':
+        await vscode.commands.executeCommand('ticCoderLite.runChangeTwin');
+        if (summary) { await render(panel, context, root, summary); }
+        break;
+      case 'generateLegacyAntibodies':
+        await vscode.commands.executeCommand('ticCoderLite.generateLegacyAntibodies');
+        if (summary) { await render(panel, context, root, summary); }
+        break;
+      case 'runChangeFirewallOnGitDiff':
+        await vscode.commands.executeCommand('ticCoderLite.runChangeFirewallOnGitDiff');
+        if (summary) { await render(panel, context, root, summary); }
+        break;
+      case 'openChangeFirewallReport':
+        await vscode.commands.executeCommand('ticCoderLite.openChangeFirewallReport');
+        break;
+      case 'openLegacyAntibodies':
+        await vscode.commands.executeCommand('ticCoderLite.openLegacyAntibodies');
+        break;
+      case 'exportAiReviewPrompt':
+        await vscode.commands.executeCommand('ticCoderLite.exportAiReviewPrompt');
+        break;
+      case 'generateChangeApprovalPack':
+        await vscode.commands.executeCommand('ticCoderLite.generateChangeApprovalPack');
+        if (summary) { await render(panel, context, root, summary); }
+        break;
+      case 'openChangeApprovalPack':
+        await vscode.commands.executeCommand('ticCoderLite.openChangeApprovalPack');
+        break;
 
       case 'openTicCodeFolder':
         await openFolder(vscode.Uri.joinPath(root.uri, '.tic-code'));
@@ -191,6 +220,7 @@ async function render(panel: vscode.WebviewPanel, context: vscode.ExtensionConte
   };
   const reversaData = await loadReversaData(root);
   const impactData = await loadImpactData(root);
+  const changeFirewallData = await loadChangeFirewallData(root);
   panel.webview.html = renderOverviewHtml({
     summary,
     engines,
@@ -199,9 +229,38 @@ async function render(panel: vscode.WebviewPanel, context: vscode.ExtensionConte
     localAiTaskLog,
     localAiConfig,
     reversaData,
-    impactData
+    impactData,
+    changeFirewallData
   });
   await context.globalState.update('ticCoderLite.lastAnalysis', summary);
+}
+
+async function loadChangeFirewallData(root: vscode.WorkspaceFolder): Promise<{
+  latestReport: ChangeSafetyReport | null;
+  latestTwin: ChangeTwinResult | null;
+  latestApprovalPack: ChangeApprovalPack | null;
+  antibodies: LegacyAntibody[] | null;
+  requiredTests: string;
+  rollbackPlan: string;
+}> {
+  const parseJson = async <T>(uri: vscode.Uri): Promise<T | null> => {
+    try {
+      const content = await readTextIfExists(uri);
+      if (!content.trim()) return null;
+      return JSON.parse(content) as T;
+    } catch {
+      return null;
+    }
+  };
+  const base = vscode.Uri.joinPath(root.uri, '.tic-code', 'change-firewall');
+  return {
+    latestReport: await parseJson<ChangeSafetyReport>(vscode.Uri.joinPath(base, 'latest-change-safety-report.json')),
+    latestTwin: await parseJson<ChangeTwinResult>(vscode.Uri.joinPath(base, 'latest-change-twin.json')),
+    latestApprovalPack: await parseJson<ChangeApprovalPack>(vscode.Uri.joinPath(base, 'latest-change-approval-pack.json')),
+    antibodies: await parseJson<LegacyAntibody[]>(vscode.Uri.joinPath(base, 'antibodies', 'legacy-antibodies.json')),
+    requiredTests: await readTextIfExists(vscode.Uri.joinPath(base, 'latest-required-tests.md')),
+    rollbackPlan: await readTextIfExists(vscode.Uri.joinPath(base, 'latest-rollback-plan.md'))
+  };
 }
 
 async function loadImpactData(root: vscode.WorkspaceFolder): Promise<{

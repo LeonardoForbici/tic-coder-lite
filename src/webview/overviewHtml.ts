@@ -2,6 +2,7 @@ import type { LocalAiTaskLogEntry } from '../local-ai/ollamaClient';
 import type { AiEngine } from '../reversa-adapter/engineTypes';
 import type { ProjectSummary } from '../types';
 import type { FileEditCandidate, ScreenImpactResult } from '../impact/impactTypes';
+import type { ChangeApprovalPack, ChangeSafetyReport, ChangeTwinResult, LegacyAntibody } from '../change-firewall/changeFirewallTypes';
 import { buildWebviewGraphData } from './graphRenderer';
 import { getOverviewScript, getOverviewStyles } from './webviewAssets';
 import { renderDatabaseEnterpriseSection } from './databaseSearch';
@@ -30,10 +31,18 @@ export interface OverviewHtmlInput {
     latestCostEstimate: Record<string, unknown> | null;
     latestFilesToEdit: FileEditCandidate[] | null;
   };
+  changeFirewallData?: {
+    latestReport: ChangeSafetyReport | null;
+    latestTwin: ChangeTwinResult | null;
+    latestApprovalPack: ChangeApprovalPack | null;
+    antibodies: LegacyAntibody[] | null;
+    requiredTests: string;
+    rollbackPlan: string;
+  };
 }
 
 export function renderOverviewHtml(input: OverviewHtmlInput): string {
-  const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig, reversaData, impactData } = input;
+  const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig, reversaData, impactData, changeFirewallData } = input;
   const graph = buildWebviewGraphData(summary.graph);
   const javaClasses = summary.inventory.javaSpring.files.length;
   const methods = estimateMethods(summary);
@@ -128,6 +137,8 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
     </section>
 
     ${renderReversaEngineSection(summary, reversaData)}
+
+    ${renderChangeFirewallSection(changeFirewallData)}
 
     <section class="section">
       <h2>Configuração Fácil</h2>
@@ -498,6 +509,108 @@ function renderImpactSummary(impactData?: OverviewHtmlInput['impactData']): stri
     ${visual ? `<p class="caption"><strong>Sinais visuais:</strong> ${visual.signals.map((signal) => escapeHtml(signal)).join(' | ')}</p>` : ''}
     ${cost ? `<p class="caption"><strong>Estimativa IA Local:</strong> modelo ${escapeHtml(String(cost.model ?? 'N/A'))}, resposta ${escapeHtml(String(cost.response ?? 'N/A'))} - <code>.tic-code/impact/latest-cost-estimate.md</code></p>` : ''}
   `;
+}
+
+function renderChangeFirewallSection(data?: OverviewHtmlInput['changeFirewallData']): string {
+  const report = data?.latestReport;
+  const twin = data?.latestTwin;
+  const approval = data?.latestApprovalPack;
+  const antibodies = data?.antibodies ?? [];
+  const antibodyCount = data?.antibodies ? antibodies.length : 'N/A';
+  const status = report?.verdict ?? 'Nao analisado';
+  const risk = report?.riskLevel ?? 'N/A';
+  const statusClass = report?.verdict === 'SAFE' ? 'badge-green' : report?.verdict === 'BLOCK' ? 'badge-red' : report?.verdict === 'REVIEW_REQUIRED' ? 'badge-yellow' : 'badge-gray';
+  const tests = report?.requiredTests ?? extractMarkdownBullets(data?.requiredTests).slice(0, 8);
+  const triggeredCount = report?.triggeredAntibodies.length;
+  const requiredTestsCount = report?.requiredTests.length;
+  const gapsCount = approval?.gaps.length ?? report?.gaps.length;
+  const rollback = data?.rollbackPlan ? '.tic-code/change-firewall/latest-rollback-plan.md' : 'N/A';
+
+  return `<section class="section premium change-firewall">
+    <div class="section-head">
+      <div>
+        <div class="kicker">AI Change Firewall</div>
+        <h2>Change Twin + Legacy Immune System + Legacy Antibodies</h2>
+        <p class="caption">Camada local-first para simular mudancas e validar diff atual antes de aceitar alteracoes em legado.</p>
+      </div>
+      <div class="actions">
+        <button class="btn primary" data-command="runChangeFirewallOnGitDiff">Validar Diff Atual</button>
+        <button class="btn" data-command="runChangeTwin">Simular Mudanca</button>
+        <button class="btn" data-command="generateLegacyAntibodies">Gerar Antibodies</button>
+      </div>
+    </div>
+    <div class="metrics premium-metrics">
+      <div class="card"><span class="value"><span class="badge ${statusClass}">${escapeHtml(status)}</span></span><span class="label">Status</span></div>
+      ${metric('Risco', risk)}
+      ${metric('Score', report?.score ?? 'N/A')}
+      ${metric('Antibodies gerados', antibodyCount)}
+    </div>
+    <div class="setup-grid">
+      <div class="card setup-card">
+        <strong>Change Twin</strong>
+        <p class="caption">${twin ? `${twin.predictedFilesToEdit.length} arquivo(s) previstos para edicao.` : 'Simule antes de codar sem alterar codigo real.'}</p>
+        <button class="btn" data-command="runChangeTwin">Simular Mudanca</button>
+      </div>
+      <div class="card setup-card">
+        <strong>Legacy Immune System</strong>
+        <p class="caption">Cruza contratos, regras, permissoes, banco, riscos, grafo e impacto por tela.</p>
+        <button class="btn" data-command="openReverseEngineeringFolder">Abrir reverse-engineering</button>
+      </div>
+      <div class="card setup-card">
+        <strong>Legacy Antibodies</strong>
+        <p class="caption">${antibodies.length ? `${antibodies.length} protecao(oes) gerada(s).` : 'Nenhum antibody gerado ainda.'}</p>
+        <button class="btn" data-command="openLegacyAntibodies">Abrir Antibodies</button>
+      </div>
+      <div class="card setup-card">
+        <strong>Change Safety Report</strong>
+        <p class="caption">${report ? `Ultimo veredito: ${report.verdict}/${report.riskLevel}.` : 'Nenhuma mudanca foi validada pelo AI Change Firewall ainda.'}</p>
+        <button class="btn" data-command="openChangeFirewallReport">Abrir Relatorio</button>
+      </div>
+      <div class="card setup-card">
+        <strong>Change Approval Pack</strong>
+        <p class="caption">${approval ? `Recomendacao: ${approval.recommendation}.` : 'nao gerado ainda'}</p>
+        <button class="btn" data-command="generateChangeApprovalPack">Gerar Pacote de Aprovacao</button>
+        <button class="btn" data-command="openChangeApprovalPack">Abrir Pacote de Aprovacao</button>
+      </div>
+    </div>
+    ${report ? `<div class="detail impact-panel" style="margin-top:12px">
+      <div class="pill-list">
+        <span class="badge ${statusClass}">${escapeHtml(report.verdict)}</span>
+        <span class="badge badge-gray">Risco ${escapeHtml(report.riskLevel)}</span>
+        <span class="badge badge-gray">Score ${report.score}</span>
+        <span class="badge badge-gray">Approval ${escapeHtml(approval?.recommendation ?? 'nao gerado')}</span>
+      </div>
+      <ul class="impact-list">
+        <li><span>Arquivos alterados</span><span class="caption mono">${escapeHtml(report.changedFiles.slice(0, 8).join(', ') || 'N/A')}</span></li>
+        <li><span>Antibodies acionados</span><span class="caption">${triggeredCount === undefined ? 'N/A' : triggeredCount} ${escapeHtml(report.triggeredAntibodies.map((item) => item.name).join(', ') || 'Nenhum')}</span></li>
+        <li><span>Testes obrigatorios</span><span class="caption">${requiredTestsCount === undefined ? 'N/A' : requiredTestsCount} ${escapeHtml(tests.join(' | ') || 'N/A')}</span></li>
+        <li><span>Lacunas pendentes</span><span class="caption">${gapsCount === undefined ? 'N/A' : gapsCount}</span></li>
+        <li><span>Rollback</span><span class="caption mono">${escapeHtml(rollback)}</span></li>
+        <li><span>Perguntas</span><span class="caption">${escapeHtml(report.questions.join(' | ') || 'N/A')}</span></li>
+      </ul>
+      <div class="actions visual-actions">
+        <button class="btn" data-command="openChangeFirewallReport">Abrir Relatorio</button>
+        <button class="btn" data-command="exportAiReviewPrompt">Exportar Prompt de Revisao</button>
+        <button class="btn" data-command="openLegacyAntibodies">Abrir Antibodies</button>
+        <button class="btn" data-command="generateChangeApprovalPack">Gerar Pacote de Aprovacao</button>
+        <button class="btn" data-command="openChangeApprovalPack">Abrir Pacote de Aprovacao</button>
+      </div>
+    </div>` : `<div class="detail impact-panel" style="margin-top:12px">
+      <div class="impact-empty">
+        <span class="badge badge-gray">Nao analisado</span>
+        <strong>Nenhuma mudanca foi validada pelo AI Change Firewall ainda.</strong>
+        <p class="caption">Execute Change Twin para simular ou Validar Diff Atual para gerar o relatorio de seguranca.</p>
+      </div>
+    </div>`}
+  </section>`;
+}
+
+function extractMarkdownBullets(markdown?: string): string[] {
+  if (!markdown) return [];
+  return markdown.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '))
+    .map((line) => line.slice(2));
 }
 
 function renderLocalAiLog(log: LocalAiTaskLogEntry[] | undefined): string {

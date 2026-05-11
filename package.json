@@ -85,6 +85,38 @@
       {
         "command": "ticCoderLite.exportChangePackageForPaidAi",
         "title": "TIC Coder Lite: Exportar Pacote para IA Paga"
+      },
+      {
+        "command": "ticCoderLite.runChangeTwin",
+        "title": "TIC Coder Lite: Simular Mudança com Change Twin"
+      },
+      {
+        "command": "ticCoderLite.generateLegacyAntibodies",
+        "title": "TIC Coder Lite: Gerar Legacy Antibodies"
+      },
+      {
+        "command": "ticCoderLite.runChangeFirewallOnGitDiff",
+        "title": "TIC Coder Lite: Validar Diff Atual com AI Change Firewall"
+      },
+      {
+        "command": "ticCoderLite.openChangeFirewallReport",
+        "title": "TIC Coder Lite: Abrir Relatório do AI Change Firewall"
+      },
+      {
+        "command": "ticCoderLite.openLegacyAntibodies",
+        "title": "TIC Coder Lite: Abrir Legacy Antibodies"
+      },
+      {
+        "command": "ticCoderLite.exportAiReviewPrompt",
+        "title": "TIC Coder Lite: Exportar Prompt de Revisão para IA"
+      },
+      {
+        "command": "ticCoderLite.generateChangeApprovalPack",
+        "title": "TIC Coder Lite: Gerar Pacote de Aprovação da Mudança"
+      },
+      {
+        "command": "ticCoderLite.openChangeApprovalPack",
+        "title": "TIC Coder Lite: Abrir Pacote de Aprovação"
       }
     ],
     "configuration": {

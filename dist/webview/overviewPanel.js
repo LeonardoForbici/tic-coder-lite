@@ -152,6 +152,42 @@ async function openOverviewPanel(context) {
             case 'exportChangePackageForPaidAi':
                 await vscode.commands.executeCommand('ticCoderLite.exportChangePackageForPaidAi');
                 break;
+            case 'runChangeTwin':
+                await vscode.commands.executeCommand('ticCoderLite.runChangeTwin');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'generateLegacyAntibodies':
+                await vscode.commands.executeCommand('ticCoderLite.generateLegacyAntibodies');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'runChangeFirewallOnGitDiff':
+                await vscode.commands.executeCommand('ticCoderLite.runChangeFirewallOnGitDiff');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'openChangeFirewallReport':
+                await vscode.commands.executeCommand('ticCoderLite.openChangeFirewallReport');
+                break;
+            case 'openLegacyAntibodies':
+                await vscode.commands.executeCommand('ticCoderLite.openLegacyAntibodies');
+                break;
+            case 'exportAiReviewPrompt':
+                await vscode.commands.executeCommand('ticCoderLite.exportAiReviewPrompt');
+                break;
+            case 'generateChangeApprovalPack':
+                await vscode.commands.executeCommand('ticCoderLite.generateChangeApprovalPack');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'openChangeApprovalPack':
+                await vscode.commands.executeCommand('ticCoderLite.openChangeApprovalPack');
+                break;
             case 'openTicCodeFolder':
                 await openFolder(vscode.Uri.joinPath(root.uri, '.tic-code'));
                 break;
@@ -224,6 +260,7 @@ async function render(panel, context, root, summary) {
     };
     const reversaData = await loadReversaData(root);
     const impactData = await loadImpactData(root);
+    const changeFirewallData = await loadChangeFirewallData(root);
     panel.webview.html = (0, overviewHtml_1.renderOverviewHtml)({
         summary,
         engines,
@@ -232,9 +269,32 @@ async function render(panel, context, root, summary) {
         localAiTaskLog,
         localAiConfig,
         reversaData,
-        impactData
+        impactData,
+        changeFirewallData
     });
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
+}
+async function loadChangeFirewallData(root) {
+    const parseJson = async (uri) => {
+        try {
+            const content = await readTextIfExists(uri);
+            if (!content.trim())
+                return null;
+            return JSON.parse(content);
+        }
+        catch {
+            return null;
+        }
+    };
+    const base = vscode.Uri.joinPath(root.uri, '.tic-code', 'change-firewall');
+    return {
+        latestReport: await parseJson(vscode.Uri.joinPath(base, 'latest-change-safety-report.json')),
+        latestTwin: await parseJson(vscode.Uri.joinPath(base, 'latest-change-twin.json')),
+        latestApprovalPack: await parseJson(vscode.Uri.joinPath(base, 'latest-change-approval-pack.json')),
+        antibodies: await parseJson(vscode.Uri.joinPath(base, 'antibodies', 'legacy-antibodies.json')),
+        requiredTests: await readTextIfExists(vscode.Uri.joinPath(base, 'latest-required-tests.md')),
+        rollbackPlan: await readTextIfExists(vscode.Uri.joinPath(base, 'latest-rollback-plan.md'))
+    };
 }
 async function loadImpactData(root) {
     const parseJson = async (uri) => {
