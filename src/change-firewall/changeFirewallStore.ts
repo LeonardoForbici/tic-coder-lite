@@ -83,7 +83,8 @@ export async function appendChroniclerEvent(root: vscode.WorkspaceFolder, event:
   await vscode.workspace.fs.createDirectory(getTicCodeUri(root, 'reversa', 'chronicler'));
   await vscode.workspace.fs.createDirectory(getTicCodeUri(root, 'reverse-engineering'));
 
-  const history = (await readJsonIfExists<Array<Record<string, unknown>>>(historyUri)) ?? [];
+  const raw = await readJsonIfExists<unknown>(historyUri);
+  const history: Array<Record<string, unknown>> = Array.isArray(raw) ? raw : [];
   history.push({ timestamp, source: 'ai-change-firewall', event, files });
   await writeJsonFile(historyUri, history);
 

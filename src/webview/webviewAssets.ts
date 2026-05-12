@@ -363,13 +363,180 @@ export function getOverviewStyles(): string {
       font-size: 12px;
     }
     .db-item:last-child { border-bottom: 0; }
-    .premium {
-      background: radial-gradient(circle at top right, rgba(56, 189, 248, 0.14), transparent 30%), var(--panel);
-      border-color: color-mix(in srgb, var(--line) 75%, #2563eb 25%);
+    .cockpit-header {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--panel) 85%, #0ea5e9 15%), var(--panel));
     }
-    .premium-metrics .card {
-      background: linear-gradient(160deg, rgba(15, 23, 42, 0.86), rgba(2, 6, 23, 0.92));
-      border-color: rgba(56, 189, 248, 0.25);
+    .cockpit-header .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 2px 0 6px;
+    }
+    .cockpit-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .cockpit-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: var(--panel);
+      display: grid;
+      gap: 4px;
+    }
+    .cockpit-value {
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .cockpit-label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .cockpit-source {
+      font-size: 10px;
+      color: var(--muted);
+      opacity: 0.7;
+    }
+    .cockpit-green { border-left: 3px solid var(--green); }
+    .cockpit-blue { border-left: 3px solid var(--blue); }
+    .cockpit-yellow { border-left: 3px solid var(--amber); }
+    .cockpit-red { border-left: 3px solid var(--danger); }
+    .cockpit-gray { border-left: 3px solid #64748b; }
+    .empty-state {
+      padding: 20px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+    }
+    .wi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .wi-project-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: var(--panel);
+      display: grid;
+      gap: 4px;
+    }
+    .wi-project-kind {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .wi-project-name { font-weight: 600; font-size: 14px; }
+    .wi-project-stats {
+      display: flex;
+      gap: 12px;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .mpg-layers {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      margin: 12px 0 16px;
+    }
+    .mpg-layer {
+      width: 100%;
+      text-align: center;
+      padding: 8px 0;
+    }
+    .mpg-layer-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+    }
+    .mpg-layer-cards {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+    }
+    .mpg-card {
+      border: 2px solid;
+      border-radius: 8px;
+      padding: 10px 14px;
+      min-width: 140px;
+      max-width: 220px;
+      background: var(--panel);
+      text-align: left;
+    }
+    .mpg-arrow {
+      font-size: 20px;
+      color: var(--muted);
+      padding: 4px 0;
+    }
+    .mpg-connectors {
+      padding: 10px 14px;
+      background: var(--panel-2);
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+    .mpg-link-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      padding: 3px 0;
+    }
+    .mpg-link-arrow { color: var(--muted); }
+    .flow-list { display: grid; gap: 8px; }
+    .flow-chain {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      font-size: 12px;
+    }
+    .flow-chain.flow-gap { border-color: rgba(239,68,68,.35); }
+    .flow-step {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .flow-icon { font-size: 14px; }
+    .flow-arrow { color: var(--muted); font-size: 14px; }
+    .flow-conf { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+    .flow-missing { color: #fca5a5; }
+    .data-table {
+      width: 100%;
+      font-size: 12px;
+      border-collapse: collapse;
+    }
+    .data-table th {
+      text-align: left;
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    .data-table td {
+      padding: 3px 8px;
+    }
+    .data-table tr + tr { border-top: 1px solid var(--line); }
+    .advanced-graph-details {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 16px;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+    .advanced-graph-summary {
+      cursor: pointer;
+      user-select: none;
+      padding: 4px 0;
     }
     .phase-grid {
       display: grid;
@@ -412,6 +579,10 @@ export function getOverviewStyles(): string {
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .impact-scoreboard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .trace-rail { grid-template-columns: 1fr; }
+      .cockpit-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .wi-grid { grid-template-columns: 1fr; }
+      .flow-chain { flex-direction: column; align-items: flex-start; }
+      .flow-conf { margin-left: 0; }
     }
   `;
 }
@@ -856,8 +1027,19 @@ export function getOverviewScript(nonce: string): string {
     });
 
     $('graphTotal').textContent = state.graph.stats.totalNodes + ' nós totais · ' + state.graph.stats.totalEdges + ' arestas totais';
-    applyLayout('agrupado');
-    selectNode(graphState.selectedNodeId);
+
+    // Defer graph rendering until the advanced section is opened
+    let graphInitialized = false;
+    const graphDetails = document.querySelector('.advanced-graph-details');
+    if (graphDetails) {
+      graphDetails.addEventListener('toggle', () => {
+        if (graphDetails.open && !graphInitialized) {
+          graphInitialized = true;
+          applyLayout('agrupado');
+          selectNode(graphState.selectedNodeId);
+        }
+      });
+    }
 
     // Database search functionality
     (function initDbSearch() {
@@ -897,5 +1079,17 @@ export function getOverviewScript(nonce: string): string {
     })();
 
     log('Painel TIC Coder Lite carregado');
+
+    // Multi-project tab switching
+    document.querySelectorAll('.mpg-tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        document.querySelectorAll('.mpg-tab-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.mpg-tab').forEach((panel) => {
+          panel.style.display = panel.id === ('mpg-tab-' + tab) ? '' : 'none';
+        });
+      });
+    });
   </script>`;
 }

@@ -7,8 +7,9 @@ const databaseSearch_1 = require("./databaseSearch");
 const databaseIndex_1 = require("../scanner/databaseIndex");
 const databaseLargeMode_1 = require("../scanner/databaseLargeMode");
 const config_1 = require("../utils/config");
+// ─── Main render ─────────────────────────────────────────────────────────────
 function renderOverviewHtml(input) {
-    const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig, reversaData, impactData, changeFirewallData } = input;
+    const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig, reversaData, impactData, projectGraphData, depImpactData } = input;
     const graph = (0, graphRenderer_1.buildWebviewGraphData)(summary.graph);
     const javaClasses = summary.inventory.javaSpring.files.length;
     const methods = estimateMethods(summary);
@@ -19,7 +20,7 @@ function renderOverviewHtml(input) {
     const plsql = summary.inventory.plsql;
     const plsqlRisks = summary.risks.risks.filter((risk) => risk.category === 'plsql');
     const detectedProjects = summary.detectedProjects ?? [];
-    // Construir seção Database Enterprise se PL/SQL for detectado
+    // Database Enterprise section
     let dbEnterpriseHtml = '';
     if (plsql.detected) {
         try {
@@ -29,16 +30,23 @@ function renderOverviewHtml(input) {
             dbEnterpriseHtml = (0, databaseSearch_1.renderDatabaseEnterpriseSection)({ index: dbIndex, summary: dbSummary });
         }
         catch {
-            // Fallback para seção básica se o enterprise mode falhar
             dbEnterpriseHtml = '';
         }
     }
+    // Cockpit metrics
+    const feApiCount = (projectGraphData?.frontendApiIndex ?? [])
+        .reduce((sum, f) => sum + (f['calls'] ?? []).length, 0);
+    const beDbCount = (projectGraphData?.backendDatabaseIndex ?? [])
+        .reduce((sum, b) => sum + (b['queries'] ?? []).length, 0);
+    const criticalRisks = summary.risks.risks.filter((r) => r.level === 'critical').length;
+    const lastImpactLevel = impactData?.latestImpact?.impactEstimate?.level ?? null;
     const data = {
         graph,
         project: summary.workspaceName,
         engines: engines.map((engine) => ({ id: engine.id, name: engine.name, detected: engine.detected })),
         projects: detectedProjects,
-        selectedProject: null
+        selectedProject: null,
+        projectGraph: projectGraphData ?? null
     };
     return `<!doctype html>
 <html lang="pt-BR">
@@ -52,185 +60,50 @@ function renderOverviewHtml(input) {
 <body>
   <script nonce="${nonce}">window.__TIC_CODE_DATA__ = ${safeJson(data)};</script>
   <main class="page">
-    <header class="header">
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         1. HEADER / COCKPIT
+         ══════════════════════════════════════════════════════════════════════ -->
+    <header class="header cockpit-header">
       <div>
-        <h1>Reversa Engine — TIC Coder Lite</h1>
-        <p class="muted">Interface gráfica VS Code para programação reversa baseada no Reversa.</p>
+        <h1>TIC Coder Lite — Reversa Engine</h1>
+        <p class="subtitle">Entenda o workspace, rastreie impacto entre projetos e valide mudanças antes da IA tocar no legado.</p>
         <p class="muted">Workspace: <strong>${escapeHtml(summary.workspaceName)}</strong></p>
       </div>
       <div class="actions">
         <button class="btn primary" data-command="analyzeWorkspace">⚡ Analisar Workspace</button>
-        <button class="btn" data-command="exportForCodex">Exportar para Codex</button>
         <button class="btn" data-command="openTicCodeFolder">Abrir .tic-code</button>
         <button class="btn" data-command="openReverseEngineeringFolder">Abrir reverse-engineering</button>
         <button class="btn" data-command="enhanceWithLocalAi">🧠 IA Local</button>
       </div>
     </header>
 
-    <section class="section">
-      <h2>Subprojetos Detectados</h2>
-      ${detectedProjects.length > 0
-        ? `<div class="project-selector">
-             <label>Selecionar projeto para análise:</label>
-             <div class="project-grid">
-               <div class="project-card active" data-project-id="all">
-                 <span class="project-icon">🌍</span>
-                 <span class="project-name">Todos os projetos</span>
-                 <span class="project-count">${detectedProjects.length} projeto(s)</span>
-               </div>
-               ${detectedProjects.map((project) => `
-                 <div class="project-card" data-project-id="${escapeHtml(project.id)}">
-                   <span class="project-icon">${getProjectIcon(project.kind)}</span>
-                   <span class="project-name">${escapeHtml(project.name)}</span>
-                   <span class="project-count">${project.files} arquivo(s) · ${project.risks} risco(s)</span>
-                 </div>
-               `).join('')}
-             </div>
-           </div>`
-        : `<div class="card"><p>Nenhum subprojeto específico detectado. Análise global sendo exibida.</p></div>`}
+    <section class="cockpit-cards" aria-label="Cockpit">
+      ${cockpitCard('Projetos detectados', detectedProjects.length > 0 ? String(detectedProjects.length) : 'não gerado', detectedProjects.length > 0 ? 'green' : 'gray', 'project-graph.json')}
+      ${cockpitCard('Pontes frontend → backend', feApiCount > 0 ? String(feApiCount) : 'não gerado', feApiCount > 0 ? 'blue' : 'gray', 'cross-project-links.json')}
+      ${cockpitCard('Pontes backend → banco', beDbCount > 0 ? String(beDbCount) : 'não gerado', beDbCount > 0 ? 'blue' : 'gray', 'backend-database-index.json')}
+      ${cockpitCard('Riscos críticos', criticalRisks > 0 ? String(criticalRisks) : '0', criticalRisks > 0 ? 'red' : 'green', 'risks.json')}
+      ${cockpitCard('Último impacto', lastImpactLevel ? lastImpactLevel : 'não analisado', lastImpactLevel ? 'yellow' : 'gray', 'impact/latest-screen-impact.json')}
     </section>
 
-    <section class="summary" aria-label="Resumo">
-      ${metric('Arquivos analisados', summary.totalFiles)}
-      ${metric('Classes Java', javaClasses)}
-      ${metric('Métodos estimados', methods)}
-      ${metric('Riscos', summary.risks.summary.total)}
-      ${metric('Engines de IA', detectedEngines.length)}
-      ${metric('Database / PL/SQL', plsql.files.length)}
-    </section>
+    <!-- ══════════════════════════════════════════════════════════════════════
+         2. WORKSPACE INTELLIGENCE
+         ══════════════════════════════════════════════════════════════════════ -->
+    ${renderWorkspaceIntelligence(detectedProjects, projectGraphData)}
 
-    ${renderReversaEngineSection(summary, reversaData)}
+    <!-- ══════════════════════════════════════════════════════════════════════
+         3. GRAFO MULTI-PROJETO
+         ══════════════════════════════════════════════════════════════════════ -->
+    ${renderProjectGraphSection(projectGraphData)}
 
-    ${renderChangeFirewallSection(changeFirewallData)}
+    <!-- ══════════════════════════════════════════════════════════════════════
+         4. FLUXO FRONTEND → BACKEND → BANCO
+         ══════════════════════════════════════════════════════════════════════ -->
+    ${renderFlowSection(projectGraphData, impactData)}
 
-    <section class="section">
-      <h2>Configuração Fácil</h2>
-      <div class="setup-grid">
-        <div class="card setup-card">
-          <strong>Começar sem configurar nada</strong>
-          <p class="caption">Usa o Modo Lite local: sem IA, sem Docker, sem banco e sem servidor.</p>
-          <button class="btn primary" data-command="setupBeginner">Aplicar padrão recomendado</button>
-        </div>
-        <div class="card setup-card">
-          <strong>Exportar para ferramentas de IA</strong>
-          <p class="caption">Detecta Codex, Claude Code, Copilot, Cursor e Gemini quando existirem no workspace.</p>
-          <button class="btn" data-command="detectEngines">Detectar ferramentas instaladas</button>
-        </div>
-        <div class="card setup-card">
-          <strong>IA Local opcional</strong>
-          <p class="caption">Liga ou desliga Ollama sem mexer em JSON. O Modo Lite continua funcionando mesmo desligado.</p>
-          <button class="btn" data-command="enableLocalAi">Ligar IA Local</button>
-          <button class="btn" data-command="disableLocalAi">Desligar IA Local</button>
-        </div>
-        <div class="card setup-card">
-          <strong>Ajustes avançados</strong>
-          <p class="caption">Abre as configurações nativas do VS Code já filtradas para TIC Coder Lite.</p>
-          <button class="btn" data-command="openSettings">Abrir configurações</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="section">
-      <h2>Modos do TIC Coder Lite</h2>
-      <div class="mode-tabs" role="tablist">
-        <button class="mode active" data-mode="lite"><strong>⚡ Modo Lite</strong><br><span class="caption">Análise local, sem IA, sem banco e sem Docker.</span></button>
-        <button class="mode" data-mode="standard"><strong>🤖 IA Padrão</strong><br><span class="caption">Exporta contexto para Codex, Claude Code, Copilot, Cursor e Gemini.</span></button>
-        <button class="mode" data-mode="local"><strong>🧠 IA Local</strong><br><span class="caption">Usa Ollama opcionalmente para melhorar resumos e perguntas.</span></button>
-      </div>
-
-      <div class="mode-panel active" data-panel="lite">
-        <p>O Modo Lite gera scan, grafo, riscos e contexto em <code>.tic-code</code> sem depender de serviços externos.</p>
-      </div>
-      <div class="mode-panel" data-panel="standard">
-        <p>A IA Padrão grava arquivos nativos para ferramentas de codificação assistida.</p>
-        <div class="actions">
-          <button class="btn primary" data-command="exportForCodex">Exportar para Codex</button>
-          <button class="btn" data-command="exportForClaude">Exportar para Claude</button>
-          <button class="btn" data-command="openTicCodeFolder">Abrir .tic-code</button>
-        <button class="btn" data-command="openReverseEngineeringFolder">Abrir reverse-engineering</button>
-          <button class="btn" data-command="exportForCopilot">Exportar para Copilot</button>
-          <button class="btn" data-command="exportForCursor">Exportar para Cursor</button>
-          <button class="btn" data-command="exportForGemini">Exportar para Gemini</button>
-        </div>
-        <p class="caption">Engines detectadas: ${detectedEngines.map((engine) => escapeHtml(engine.name)).join(', ') || 'nenhuma detectada ainda'}.</p>
-      </div>
-      <div class="mode-panel" data-panel="local">
-        <p>A IA Local é opcional e usa Ollama quando estiver configurado. O scan continua funcionando sem ela.</p>
-        ${localAiConfig ? `<p class="caption">Modelo local: <strong>${escapeHtml(localAiConfig.model || localAiConfig.fastModel)}</strong> &middot; modo: <strong>${escapeHtml(localAiConfig.mode)}</strong> &middot; ${localAiConfig.enabled ? 'ativado' : 'desativado'}</p>` : ''}
-        <button class="btn primary" data-command="enhanceLocalAi">Melhorar com IA Local</button>
-        ${renderLocalAiLog(localAiTaskLog)}
-      </div>
-    </section>
-
-    <section class="section">
-      <h2>Grafo do Workspace</h2>
-      <div class="card graph-card">
-        <div class="graph-toolbar">
-          <div>
-            <strong>Mapa de dependências do workspace</strong>
-            <div class="caption">
-              <span id="graphTotal">${summary.graph.stats.nodeCount} nós totais · ${summary.graph.stats.edgeCount} arestas totais</span>
-              · <span id="graphVisible">carregando...</span>
-              · <span class="muted">${graph.stats.internalCount} internos · ${graph.stats.externalCount + graph.stats.frameworkCount} externos ocultos por padrão</span>
-            </div>
-          </div>
-          <div class="graph-tools">
-            <input id="graphSearch" type="search" placeholder="Buscar nó ou arquivo">
-            <select id="originFilter" aria-label="Filtrar por origem">
-              <option value="internal" selected>Internos</option>
-              <option value="external">Externos</option>
-              <option value="framework">Frameworks</option>
-              <option value="high-risk">Alto risco</option>
-              <option value="all">Todos</option>
-            </select>
-            <select id="stackFilter" aria-label="Filtrar por stack">
-              <option value="all" selected>Todos</option>
-              <option value="backend-java">Backend Java</option>
-              <option value="frontend-react">Frontend React/TS</option>
-              <option value="javascript">JavaScript</option>
-              <option value="database">Database / PL/SQL</option>
-              <option value="infra">Infra</option>
-              <option value="end-to-end">Fluxo ponta-a-ponta</option>
-            </select>
-            <select id="moduleFilter" aria-label="Filtrar por módulo"></select>
-            <select id="layoutSelect" aria-label="Layout do grafo">
-              <option value="agrupado">Agrupado</option>
-              <option value="radial">Radial</option>
-              <option value="camadas">Camadas</option>
-            </select>
-            <input id="density" type="range" min="15" max="100" value="65" title="Densidade de arestas">
-            <button class="btn compact" id="zoomOut">−</button>
-            <button class="btn compact" id="fitGraph">Ajustar</button>
-            <button class="btn compact" id="zoomIn">+</button>
-            <button class="btn compact" id="toggleLabels">Rótulos</button>
-          </div>
-        </div>
-        <div id="graphOriginInfo" class="caption" style="padding:4px 10px;background:var(--vscode-textBlockQuote-background,#f0f4ff);border-radius:4px;margin:4px 0">
-          Exibindo apenas nós internos do workspace. Dependências externas foram ocultadas para reduzir ruído. Use o filtro <em>Externos</em> ou <em>Todos</em> para ver dependências de terceiros.
-        </div>
-        <div class="graph-shell">
-          <div class="graph-wrap" id="graphWrap">
-            <svg id="graph" role="img" aria-label="Grafo de dependências do TIC Coder Lite"></svg>
-            <div class="graph-hint">Arraste o fundo para mover · use scroll para zoom · clique em um nó para detalhes</div>
-          </div>
-          <aside class="graph-side">
-            <h2 id="nodeTitle">Nó</h2>
-            <div class="caption mono" id="nodeMeta"></div>
-            <ul id="nodeDetails"></ul>
-            <h2 style="margin-top:16px">Dependências externas do nó</h2>
-            <ul id="nodeExternalDeps" class="caption"></ul>
-            <h2 style="margin-top:16px">Legenda</h2>
-            <div class="legend">
-              <span>controller</span><span>service</span><span>repository</span><span>entity</span><span>externo</span><span>framework</span><span>risco alto</span>
-            </div>
-            <h2 style="margin-top:16px">Arestas do nó</h2>
-            <ul id="nodeEdges"></ul>
-          </aside>
-        </div>
-      </div>
-    </section>
-
-
+    <!-- ══════════════════════════════════════════════════════════════════════
+         5. IMPACTO POR IMAGEM / TELA
+         ══════════════════════════════════════════════════════════════════════ -->
     <section class="section visual-intel">
       <div class="section-head">
         <div>
@@ -297,10 +170,15 @@ function renderOverviewHtml(input) {
       </div>
     </section>
 
-    <section class="section">
-      <h2>Riscos</h2>
-      <ul>${highRiskFiles.map((file) => `<li><span class="mono">${escapeHtml(file.path)}</span><span class="risk-${escapeHtml(file.level)}">${riskLabel(file.level)}</span></li>`).join('') || '<li><span>Nenhum risco alto detectado.</span></li>'}</ul>
-    </section>
+    <!-- ══════════════════════════════════════════════════════════════════════
+         6. DEPENDENCY CHANGE IMPACT
+         ══════════════════════════════════════════════════════════════════════ -->
+    ${renderDepImpactSection(depImpactData)}
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         8. EVIDÊNCIAS / REVERSA / SDD
+         ══════════════════════════════════════════════════════════════════════ -->
+    ${renderReversaEngineSection(summary, reversaData)}
 
     ${dbEnterpriseHtml || (plsql.detected ? `
     <section class="section">
@@ -318,6 +196,11 @@ function renderOverviewHtml(input) {
       <h3 style="margin-top:14px">Riscos PL/SQL</h3>
       <ul>${plsqlRisks.slice(0, 12).map((risk) => `<li><span class="mono">${escapeHtml(risk.title)} (${escapeHtml(risk.file)}${risk.line ? `:${risk.line}` : ''})</span><span class="risk-${escapeHtml(risk.level)}">${riskLabel(risk.level)}</span></li>`).join('') || '<li><span>Nenhum risco PL/SQL detectado.</span></li>'}</ul>
     </section>` : '')}
+
+    <section class="section">
+      <h2>Riscos</h2>
+      <ul>${highRiskFiles.map((file) => `<li><span class="mono">${escapeHtml(file.path)}</span><span class="risk-${escapeHtml(file.level)}">${riskLabel(file.level)}</span></li>`).join('') || '<li><span>Nenhum risco alto detectado.</span></li>'}</ul>
+    </section>
 
     <section class="section">
       <h2>🔍 Programação Reversa / SDD</h2>
@@ -372,10 +255,10 @@ function renderOverviewHtml(input) {
       <div class="mode-panel" data-panel="rev-local">
         <p>Ollama é opcional. O TIC Coder Lite gera todos os artefatos de programação reversa sem Ollama.</p>
         <p>Com Ollama ativado, você pode melhorar:</p>
-        <ul>
-          <li>Resumos de regras de negócio candidatas</li>
-          <li>Perguntas de validação humana</li>
-          <li>Descrições de domínio e arquitetura</li>
+        <ul style="display:block;list-style:disc;padding-left:20px">
+          <li style="display:list-item;border:0;padding:0">Resumos de regras de negócio candidatas</li>
+          <li style="display:list-item;border:0;padding:0">Perguntas de validação humana</li>
+          <li style="display:list-item;border:0;padding:0">Descrições de domínio e arquitetura</li>
         </ul>
         <button class="btn" data-command="enhanceLocalAi">🧠 Melhorar com Ollama (opcional)</button>
         <p class="caption">Selecione o modo em <code>ticCoderLite.localAi.mode</code>: <strong>auto</strong> (padrão), <strong>fast</strong> ou <strong>quality</strong>.</p>
@@ -386,6 +269,68 @@ function renderOverviewHtml(input) {
       <h3 style="margin-top:14px">Programação Reversa por Projeto</h3>
       <ul>${detectedProjects.map((project) => `<li>${getProjectIcon(project.kind)} <strong>${escapeHtml(project.name)}</strong> — <span class="mono">.tic-code/projects/${escapeHtml(project.id)}/reverse-engineering/</span></li>`).join('')}</ul>
       ` : ''}
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         CONFIGURAÇÃO / MODOS / EXPORTAÇÕES
+         ══════════════════════════════════════════════════════════════════════ -->
+    <section class="section">
+      <h2>Configuração Fácil</h2>
+      <div class="setup-grid">
+        <div class="card setup-card">
+          <strong>Começar sem configurar nada</strong>
+          <p class="caption">Usa o Modo Lite local: sem IA, sem Docker, sem banco e sem servidor.</p>
+          <button class="btn primary" data-command="setupBeginner">Aplicar padrão recomendado</button>
+        </div>
+        <div class="card setup-card">
+          <strong>Exportar para ferramentas de IA</strong>
+          <p class="caption">Detecta Codex, Claude Code, Copilot, Cursor e Gemini quando existirem no workspace.</p>
+          <button class="btn" data-command="detectEngines">Detectar ferramentas instaladas</button>
+        </div>
+        <div class="card setup-card">
+          <strong>IA Local opcional</strong>
+          <p class="caption">Liga ou desliga Ollama sem mexer em JSON. O Modo Lite continua funcionando mesmo desligado.</p>
+          <button class="btn" data-command="enableLocalAi">Ligar IA Local</button>
+          <button class="btn" data-command="disableLocalAi">Desligar IA Local</button>
+        </div>
+        <div class="card setup-card">
+          <strong>Ajustes avançados</strong>
+          <p class="caption">Abre as configurações nativas do VS Code já filtradas para TIC Coder Lite.</p>
+          <button class="btn" data-command="openSettings">Abrir configurações</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Modos do TIC Coder Lite</h2>
+      <div class="mode-tabs" role="tablist">
+        <button class="mode active" data-mode="lite"><strong>⚡ Modo Lite</strong><br><span class="caption">Análise local, sem IA, sem banco e sem Docker.</span></button>
+        <button class="mode" data-mode="standard"><strong>🤖 IA Padrão</strong><br><span class="caption">Exporta contexto para Codex, Claude Code, Copilot, Cursor e Gemini.</span></button>
+        <button class="mode" data-mode="local"><strong>🧠 IA Local</strong><br><span class="caption">Usa Ollama opcionalmente para melhorar resumos e perguntas.</span></button>
+      </div>
+
+      <div class="mode-panel active" data-panel="lite">
+        <p>O Modo Lite gera scan, grafo, riscos e contexto em <code>.tic-code</code> sem depender de serviços externos.</p>
+      </div>
+      <div class="mode-panel" data-panel="standard">
+        <p>A IA Padrão grava arquivos nativos para ferramentas de codificação assistida.</p>
+        <div class="actions">
+          <button class="btn primary" data-command="exportForCodex">Exportar para Codex</button>
+          <button class="btn" data-command="exportForClaude">Exportar para Claude</button>
+          <button class="btn" data-command="openTicCodeFolder">Abrir .tic-code</button>
+          <button class="btn" data-command="openReverseEngineeringFolder">Abrir reverse-engineering</button>
+          <button class="btn" data-command="exportForCopilot">Exportar para Copilot</button>
+          <button class="btn" data-command="exportForCursor">Exportar para Cursor</button>
+          <button class="btn" data-command="exportForGemini">Exportar para Gemini</button>
+        </div>
+        <p class="caption">Engines detectadas: ${detectedEngines.map((engine) => escapeHtml(engine.name)).join(', ') || 'nenhuma detectada ainda'}.</p>
+      </div>
+      <div class="mode-panel" data-panel="local">
+        <p>A IA Local é opcional e usa Ollama quando estiver configurado. O scan continua funcionando sem ela.</p>
+        ${localAiConfig ? `<p class="caption">Modelo local: <strong>${escapeHtml(localAiConfig.model || localAiConfig.fastModel)}</strong> &middot; modo: <strong>${escapeHtml(localAiConfig.mode)}</strong> &middot; ${localAiConfig.enabled ? 'ativado' : 'desativado'}</p>` : ''}
+        <button class="btn primary" data-command="enhanceLocalAi">Melhorar com IA Local</button>
+        ${renderLocalAiLog(localAiTaskLog)}
+      </div>
     </section>
 
     <section class="section">
@@ -418,6 +363,88 @@ function renderOverviewHtml(input) {
       </div>
     </section>
 
+    <!-- ══════════════════════════════════════════════════════════════════════
+         9. GRAFO BRUTO — AVANÇADO (RECOLHÍVEL)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <details class="section advanced-graph-details">
+      <summary class="advanced-graph-summary">
+        <h2 style="display:inline;margin:0">Grafo bruto do workspace — avançado</h2>
+      </summary>
+      <p class="caption" style="margin:10px 0">Use esta visão para inspeção técnica detalhada. Para fluxos entre projetos, veja <strong>Grafo Multi-Projeto</strong> acima.</p>
+      <div class="summary" aria-label="Resumo">
+        ${metric('Arquivos analisados', summary.totalFiles)}
+        ${metric('Classes Java', javaClasses)}
+        ${metric('Métodos estimados', methods)}
+        ${metric('Riscos', summary.risks.summary.total)}
+        ${metric('Engines de IA', detectedEngines.length)}
+        ${metric('Database / PL/SQL', plsql.files.length)}
+      </div>
+      <div class="card graph-card">
+        <div class="graph-toolbar">
+          <div>
+            <strong>Mapa de dependências do workspace</strong>
+            <div class="caption">
+              <span id="graphTotal">${summary.graph.stats.nodeCount} nós totais · ${summary.graph.stats.edgeCount} arestas totais</span>
+              · <span id="graphVisible">carregando...</span>
+              · <span class="muted">${graph.stats.internalCount} internos · ${graph.stats.externalCount + graph.stats.frameworkCount} externos ocultos por padrão</span>
+            </div>
+          </div>
+          <div class="graph-tools">
+            <input id="graphSearch" type="search" placeholder="Buscar nó ou arquivo">
+            <select id="originFilter" aria-label="Filtrar por origem">
+              <option value="internal" selected>Internos</option>
+              <option value="external">Externos</option>
+              <option value="framework">Frameworks</option>
+              <option value="high-risk">Alto risco</option>
+              <option value="all">Todos</option>
+            </select>
+            <select id="stackFilter" aria-label="Filtrar por stack">
+              <option value="all" selected>Todos</option>
+              <option value="backend-java">Backend Java</option>
+              <option value="frontend-react">Frontend React/TS</option>
+              <option value="javascript">JavaScript</option>
+              <option value="database">Database / PL/SQL</option>
+              <option value="infra">Infra</option>
+              <option value="end-to-end">Fluxo ponta-a-ponta</option>
+            </select>
+            <select id="moduleFilter" aria-label="Filtrar por módulo"></select>
+            <select id="layoutSelect" aria-label="Layout do grafo">
+              <option value="agrupado">Agrupado</option>
+              <option value="radial">Radial</option>
+              <option value="camadas">Camadas</option>
+            </select>
+            <input id="density" type="range" min="15" max="100" value="65" title="Densidade de arestas">
+            <button class="btn compact" id="zoomOut">−</button>
+            <button class="btn compact" id="fitGraph">Ajustar</button>
+            <button class="btn compact" id="zoomIn">+</button>
+            <button class="btn compact" id="toggleLabels">Rótulos</button>
+          </div>
+        </div>
+        <div id="graphOriginInfo" class="caption" style="padding:4px 10px;background:var(--vscode-textBlockQuote-background,#f0f4ff);border-radius:4px;margin:4px 0">
+          Exibindo apenas nós internos do workspace. Dependências externas foram ocultadas para reduzir ruído. Use o filtro <em>Externos</em> ou <em>Todos</em> para ver dependências de terceiros.
+        </div>
+        <div class="graph-shell">
+          <div class="graph-wrap" id="graphWrap">
+            <svg id="graph" role="img" aria-label="Grafo de dependências do TIC Coder Lite"></svg>
+            <div class="graph-hint">Arraste o fundo para mover · use scroll para zoom · clique em um nó para detalhes</div>
+          </div>
+          <aside class="graph-side">
+            <h2 id="nodeTitle">Nó</h2>
+            <div class="caption mono" id="nodeMeta"></div>
+            <ul id="nodeDetails"></ul>
+            <h2 style="margin-top:16px">Dependências externas do nó</h2>
+            <ul id="nodeExternalDeps" class="caption"></ul>
+            <h2 style="margin-top:16px">Legenda</h2>
+            <div class="legend">
+              <span>controller</span><span>service</span><span>repository</span><span>entity</span><span>externo</span><span>framework</span><span>risco alto</span>
+            </div>
+            <h2 style="margin-top:16px">Arestas do nó</h2>
+            <ul id="nodeEdges"></ul>
+          </aside>
+        </div>
+      </div>
+    </details>
+
     <section class="section">
       <h2>Log do TIC</h2>
       <div class="log" id="logs"></div>
@@ -427,13 +454,366 @@ function renderOverviewHtml(input) {
 </body>
 </html>`;
 }
+// ─── Cockpit card ────────────────────────────────────────────────────────────
+function cockpitCard(label, value, color, source) {
+    return `<div class="cockpit-card cockpit-${color}">
+    <span class="cockpit-value">${escapeHtml(value)}</span>
+    <span class="cockpit-label">${escapeHtml(label)}</span>
+    <span class="cockpit-source">Fonte: ${escapeHtml(source)}</span>
+  </div>`;
+}
+// ─── 2. Workspace Intelligence ───────────────────────────────────────────────
+function renderWorkspaceIntelligence(projects, projectGraphData) {
+    const actualProjects = projects ?? [];
+    if (actualProjects.length === 0 && !projectGraphData?.projectGraph) {
+        return `<section class="section">
+      <div class="kicker">Workspace Intelligence</div>
+      <h2>Projetos Detectados</h2>
+      <div class="empty-state">
+        <p>Rode <strong>Analisar Workspace</strong> para gerar o grafo multi-projeto.</p>
+      </div>
+    </section>`;
+    }
+    const kindBorder = { frontend: '#38bdf8', backend: '#86efac', database: '#fcd34d', mobile: '#c4b5fd', shared: '#fdba74', infra: '#94a3b8' };
+    const projectCards = actualProjects.map((project) => {
+        const border = kindBorder[project.kind] ?? '#94a3b8';
+        return `<div class="wi-project-card" style="border-left:4px solid ${border}">
+      <div class="wi-project-kind" style="color:${border}">${escapeHtml(project.kind.toUpperCase())}</div>
+      <div class="wi-project-name">${getProjectIcon(project.kind)} ${escapeHtml(project.name)}</div>
+      <div class="caption mono">${escapeHtml(project.relativePath || '.')}</div>
+      <div class="caption">${project.stack.join(', ') || 'stack não detectada'}</div>
+      <div class="wi-project-stats">
+        <span>${project.files} arquivos</span>
+        <span class="${project.risks > 0 ? 'risk-high' : ''}">${project.risks} riscos</span>
+      </div>
+    </div>`;
+    }).join('');
+    return `<section class="section">
+    <div class="kicker">Workspace Intelligence</div>
+    <h2>Projetos Detectados</h2>
+    <p class="caption">${actualProjects.length} projeto(s) identificado(s) neste workspace. Fonte: <code>project-graph.json</code></p>
+    <div class="wi-grid">${projectCards}</div>
+  </section>`;
+}
+// ─── 3. Project Graph ────────────────────────────────────────────────────────
+function renderProjectGraphSection(data) {
+    const pg = data?.projectGraph;
+    const cl = data?.crossProjectLinks;
+    const fe = data?.frontendApiIndex ?? [];
+    const be = data?.backendEndpointIndex ?? [];
+    const hasData = pg || cl || fe.length > 0 || be.length > 0;
+    if (!hasData) {
+        return `
+    <section class="section">
+      <div class="kicker">Multi-Projeto</div>
+      <h2>Grafo Multi-Projeto</h2>
+      <div class="empty-state">
+        <p>Nenhum dado de multi-projeto disponível.</p>
+        <p class="caption">Rode <strong>Analisar Workspace</strong> para gerar o Grafo Multi-Projeto e Cross-Project Links.</p>
+      </div>
+    </section>`;
+    }
+    const projects = pg ? (pg['projects'] ?? []) : [];
+    const crossLinks = cl ? (cl['links'] ?? []) : [];
+    const gaps = cl ? (cl['gaps'] ?? []) : [];
+    const kindBorder = { frontend: '#38bdf8', backend: '#86efac', database: '#fcd34d', mobile: '#c4b5fd', shared: '#fdba74', infra: '#94a3b8' };
+    const sortedProjects = [...projects].sort((a, b) => {
+        const order = { frontend: 0, mobile: 1, backend: 2, shared: 3, database: 4, infra: 5 };
+        return (order[a['kind']] ?? 9) - (order[b['kind']] ?? 9);
+    });
+    const linksByPair = new Map();
+    for (const l of crossLinks) {
+        const lnk = l;
+        const key = `${lnk['fromProjectId']}→${lnk['toProjectId']}`;
+        const existing = linksByPair.get(key);
+        const conf = String(lnk['confidence'] ?? 'GAP');
+        const bestConf = existing ? (existing.conf === 'CONFIRMED' ? 'CONFIRMED' : conf) : conf;
+        linksByPair.set(key, { count: (existing?.count ?? 0) + 1, conf: bestConf });
+    }
+    // Layered view: Frontend → API/Endpoints → Backend → SQL/Database
+    const frontendProjects = sortedProjects.filter((p) => p['kind'] === 'frontend' || p['kind'] === 'mobile');
+    const backendProjects = sortedProjects.filter((p) => p['kind'] === 'backend' || p['kind'] === 'shared');
+    const databaseProjects = sortedProjects.filter((p) => p['kind'] === 'database');
+    const infraProjects = sortedProjects.filter((p) => p['kind'] === 'infra');
+    const renderLayer = (label, projs, color) => {
+        if (projs.length === 0)
+            return '';
+        return `<div class="mpg-layer">
+      <div class="mpg-layer-label" style="color:${color}">${escapeHtml(label)}</div>
+      <div class="mpg-layer-cards">
+        ${projs.map((p) => {
+            const proj = p;
+            const kind = String(proj['kind'] ?? 'unknown');
+            const border = kindBorder[kind] ?? '#94a3b8';
+            const name = String(proj['name'] ?? proj['id']);
+            const files = String(proj['files'] ?? 0);
+            const risks = String(proj['risks'] ?? 0);
+            const stack = proj['stack']?.slice(0, 3).join(', ') ?? '';
+            return `<div class="mpg-card" style="border-color:${border}">
+            <div style="font-weight:600;font-size:13px">${escapeHtml(name)}</div>
+            ${stack ? `<div class="caption">${escapeHtml(stack)}</div>` : ''}
+            <div class="caption">${files} arq · ${risks} riscos</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+    };
+    const layerArrow = `<div class="mpg-arrow">↓</div>`;
+    const layersHtml = [
+        renderLayer('Frontend Projects', frontendProjects, '#38bdf8'),
+        frontendProjects.length > 0 && backendProjects.length > 0 ? layerArrow : '',
+        backendProjects.length > 0 ? `<div class="mpg-layer"><div class="mpg-layer-label" style="color:#86efac">API / Endpoints</div><div class="caption" style="text-align:center;padding:4px 0">${crossLinks.length} ponte(s) detectada(s) · ${gaps.length} lacuna(s)</div></div>` : '',
+        backendProjects.length > 0 ? layerArrow : '',
+        renderLayer('Backend Projects', backendProjects, '#86efac'),
+        (backendProjects.length > 0 || frontendProjects.length > 0) && databaseProjects.length > 0 ? layerArrow : '',
+        renderLayer('SQL / Database', databaseProjects, '#fcd34d'),
+        infraProjects.length > 0 ? renderLayer('Infra', infraProjects, '#94a3b8') : ''
+    ].filter(Boolean).join('');
+    // Cross-project link details
+    const connectorItems = [...linksByPair.entries()].slice(0, 20).map(([key, info]) => {
+        const [from, to] = key.split('→');
+        const confClass = info.conf === 'CONFIRMED' ? 'badge-green' : info.conf === 'INFERRED' ? 'badge-yellow' : 'badge-gray';
+        return `<div class="mpg-link-row">
+      <span class="mono">${escapeHtml(from)}</span>
+      <span class="mpg-link-arrow">→</span>
+      <span class="mono">${escapeHtml(to)}</span>
+      <span class="badge ${confClass}">${escapeHtml(info.conf)}</span>
+      <span class="caption">(${info.count} link${info.count !== 1 ? 's' : ''})</span>
+    </div>`;
+    }).join('');
+    return `
+  <section class="section">
+    <div class="section-head">
+      <div>
+        <div class="kicker">Multi-Projeto</div>
+        <h2>Grafo Multi-Projeto</h2>
+        <p class="caption">${projects.length} projeto(s) · ${crossLinks.length} ponte(s) cross-project · ${gaps.length} lacuna(s)</p>
+      </div>
+      <div class="actions">
+        <button class="btn compact" data-command="openProjectGraph">project-graph.json</button>
+        <button class="btn compact" data-command="openCrossProjectLinks">cross-project-links.md</button>
+      </div>
+    </div>
+
+    <div class="mpg-layers">${layersHtml}</div>
+
+    ${connectorItems ? `<div class="mpg-connectors">${connectorItems}
+      ${gaps.length > 0 ? `<div class="caption" style="color:#fca5a5;margin-top:6px">⚠️ ${gaps.length} chamada(s) sem endpoint correspondente (lacuna)</div>` : ''}
+    </div>` : ''}
+
+    <div class="graph-tabs" style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
+      <button class="btn compact mpg-tab-btn active" data-tab="pontes">Pontes (${crossLinks.length})</button>
+      <button class="btn compact mpg-tab-btn" data-tab="frontend">Frontend API (${fe.flatMap((f) => (f['calls'] ?? [])).length})</button>
+      <button class="btn compact mpg-tab-btn" data-tab="backend">Backend Endpoints (${be.flatMap((b) => (b['endpoints'] ?? [])).length})</button>
+    </div>
+
+    <div id="mpg-tab-pontes" class="mpg-tab">
+      ${crossLinks.length === 0 ? `<p class="caption">Nenhum cross-project link encontrado. ${gaps.length > 0 ? `${gaps.length} chamadas frontend não mapeadas.` : 'Rode Analisar Workspace para detectar pontes entre frontend e backend.'}</p>` : `
+      <div style="overflow-x:auto">
+      <table class="data-table">
+        <thead><tr>
+          <th>De</th><th>Arquivo</th><th>Método</th><th>Endpoint</th><th>Para</th><th>Controller</th><th>Conf.</th>
+        </tr></thead>
+        <tbody>
+          ${crossLinks.slice(0, 80).map((l) => {
+        const lnk = l;
+        const confVal = String(lnk['confidence'] ?? '');
+        const confClass = confVal === 'CONFIRMED' ? 'badge-green' : confVal === 'INFERRED' ? 'badge-yellow' : 'badge-gray';
+        return `<tr>
+              <td class="mono">${escapeHtml(String(lnk['fromProjectId'] ?? ''))}</td>
+              <td class="mono" title="${escapeHtml(String(lnk['fromFile'] ?? ''))}">${escapeHtml(String(lnk['fromFile'] ?? '').split('/').pop() ?? '')}</td>
+              <td><span class="badge badge-blue">${escapeHtml(String(lnk['method'] ?? ''))}</span></td>
+              <td class="mono">${escapeHtml(String(lnk['endpoint'] ?? ''))}</td>
+              <td class="mono">${escapeHtml(String(lnk['toProjectId'] ?? ''))}</td>
+              <td class="mono" title="${escapeHtml(String(lnk['toFile'] ?? ''))}">${escapeHtml(String(lnk['toFile'] ?? '').split('/').pop() ?? '')}</td>
+              <td><span class="badge ${confClass}">${confVal}</span></td>
+            </tr>`;
+    }).join('')}
+        </tbody>
+      </table></div>`}
+    </div>
+
+    <div id="mpg-tab-frontend" class="mpg-tab" style="display:none">
+      ${fe.length === 0 ? '<p class="caption">Nenhuma chamada API frontend detectada. Rode Analisar Workspace.</p>' : `
+      <div style="overflow-x:auto"><table class="data-table">
+        <thead><tr><th>Projeto</th><th>Arquivo</th><th>Método</th><th>Rota</th><th>Conf.</th></tr></thead>
+        <tbody>
+          ${fe.flatMap((f) => {
+        const idx = f;
+        const calls = idx['calls'] ?? [];
+        return calls.slice(0, 20).map((c) => {
+            const call = c;
+            const confVal = String(call['confidence'] ?? '');
+            const confClass = confVal === 'CONFIRMED' ? 'badge-green' : confVal === 'INFERRED' ? 'badge-yellow' : 'badge-gray';
+            return `<tr>
+                <td class="mono">${escapeHtml(String(call['projectId'] ?? idx['projectId'] ?? ''))}</td>
+                <td class="mono" title="${escapeHtml(String(call['file'] ?? ''))}">${escapeHtml(String(call['file'] ?? '').split('/').pop() ?? '')}</td>
+                <td><span class="badge badge-blue">${escapeHtml(String(call['method'] ?? ''))}</span></td>
+                <td class="mono">${escapeHtml(String(call['path'] ?? ''))}</td>
+                <td><span class="badge ${confClass}">${confVal}</span></td>
+              </tr>`;
+        });
+    }).join('')}
+        </tbody>
+      </table></div>`}
+    </div>
+
+    <div id="mpg-tab-backend" class="mpg-tab" style="display:none">
+      ${be.length === 0 ? '<p class="caption">Nenhum endpoint backend detectado. Rode Analisar Workspace.</p>' : `
+      <div style="overflow-x:auto"><table class="data-table">
+        <thead><tr><th>Projeto</th><th>Controller</th><th>Método</th><th>Rota</th><th>Conf.</th></tr></thead>
+        <tbody>
+          ${be.flatMap((b) => {
+        const idx = b;
+        const endpoints = idx['endpoints'] ?? [];
+        return endpoints.slice(0, 20).map((e) => {
+            const ep = e;
+            const confVal = String(ep['confidence'] ?? '');
+            const confClass = confVal === 'CONFIRMED' ? 'badge-green' : confVal === 'INFERRED' ? 'badge-yellow' : 'badge-gray';
+            return `<tr>
+                <td class="mono">${escapeHtml(String(ep['projectId'] ?? idx['projectId'] ?? ''))}</td>
+                <td class="mono" title="${escapeHtml(String(ep['controllerFile'] ?? ''))}">${escapeHtml(String(ep['controllerFile'] ?? '').split('/').pop() ?? '')}</td>
+                <td><span class="badge badge-blue">${escapeHtml(String(ep['httpMethod'] ?? ''))}</span></td>
+                <td class="mono">${escapeHtml(String(ep['fullPath'] ?? ep['path'] ?? ''))}</td>
+                <td><span class="badge ${confClass}">${confVal}</span></td>
+              </tr>`;
+        });
+    }).join('')}
+        </tbody>
+      </table></div>`}
+    </div>
+  </section>`;
+}
+// ─── 4. Flow Section ─────────────────────────────────────────────────────────
+function renderFlowSection(projectGraphData, impactData) {
+    const cl = projectGraphData?.crossProjectLinks;
+    const crossLinks = cl ? (cl['links'] ?? []) : [];
+    const fe = projectGraphData?.frontendApiIndex ?? [];
+    const be = projectGraphData?.backendEndpointIndex ?? [];
+    const bdbi = projectGraphData?.backendDatabaseIndex ?? [];
+    const impact = impactData?.latestImpact;
+    const hasAnyFlowData = crossLinks.length > 0 || fe.length > 0 || be.length > 0 || bdbi.length > 0 || impact;
+    if (!hasAnyFlowData) {
+        return `<section class="section">
+      <div class="kicker">Fluxos</div>
+      <h2>Fluxos Detectados</h2>
+      <div class="empty-state">
+        <p>Nenhum fluxo frontend → backend → banco detectado.</p>
+        <p class="caption">Rode <strong>Analisar Workspace</strong> para detectar fluxos entre camadas.</p>
+      </div>
+    </section>`;
+    }
+    // Build flow chains from cross-project links
+    const flowRows = [];
+    // If we have screen impact data, show that first
+    if (impact) {
+        const feMatches = impact.frontendMatches.slice(0, 5);
+        const apis = impact.apiCalls.slice(0, 5);
+        const tables = impact.databaseImpact.tables.slice(0, 5);
+        flowRows.push(`<div class="flow-chain">
+      <div class="flow-step flow-screen">
+        <span class="flow-icon">🖥️</span>
+        <span>${escapeHtml(impact.input.userHints.screenName || impact.input.url || 'Tela analisada')}</span>
+        <span class="badge badge-blue">Impact</span>
+      </div>
+      ${feMatches.length > 0 ? `<div class="flow-arrow">→</div><div class="flow-step flow-frontend">
+        <span class="flow-icon">🎨</span>
+        <span>${feMatches.map((m) => escapeHtml(m.file.split('/').pop() ?? '')).join(', ')}</span>
+      </div>` : ''}
+      ${apis.length > 0 ? `<div class="flow-arrow">→</div><div class="flow-step flow-api">
+        <span class="flow-icon">📡</span>
+        <span>${apis.map((a) => escapeHtml(`${a.method} ${a.path}`)).join(', ')}</span>
+      </div>` : ''}
+      ${tables.length > 0 ? `<div class="flow-arrow">→</div><div class="flow-step flow-db">
+        <span class="flow-icon">🗄️</span>
+        <span>${tables.map((t) => escapeHtml(t)).join(', ')}</span>
+      </div>` : ''}
+      <div class="flow-conf"><span class="badge badge-yellow">Fonte: latest-screen-impact.json</span></div>
+    </div>`);
+    }
+    // Build flows from cross-project links (group by endpoint)
+    const byEndpoint = new Map();
+    for (const l of crossLinks.slice(0, 30)) {
+        const lnk = l;
+        const key = `${lnk['method'] ?? ''} ${lnk['endpoint'] ?? ''}`;
+        if (!byEndpoint.has(key))
+            byEndpoint.set(key, []);
+        byEndpoint.get(key).push(lnk);
+    }
+    let flowCount = 0;
+    for (const [endpoint, links] of byEndpoint) {
+        if (flowCount >= 10)
+            break;
+        const first = links[0];
+        const conf = String(first['confidence'] ?? 'GAP');
+        const confClass = conf === 'CONFIRMED' ? 'badge-green' : conf === 'INFERRED' ? 'badge-yellow' : 'badge-red';
+        const confLabel = conf === 'CONFIRMED' ? '🟢' : conf === 'INFERRED' ? '🟡' : '🔴';
+        flowRows.push(`<div class="flow-chain">
+      <div class="flow-step flow-frontend">
+        <span class="flow-icon">🎨</span>
+        <span class="mono">${escapeHtml(String(first['fromFile'] ?? '').split('/').pop() ?? '')}</span>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step flow-api">
+        <span class="flow-icon">📡</span>
+        <span class="mono">${escapeHtml(endpoint)}</span>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step flow-backend">
+        <span class="flow-icon">⚙️</span>
+        <span class="mono">${escapeHtml(String(first['toFile'] ?? '').split('/').pop() ?? String(first['toProjectId'] ?? 'não encontrado'))}</span>
+      </div>
+      <div class="flow-conf">${confLabel} <span class="badge ${confClass}">${escapeHtml(conf)}</span></div>
+    </div>`);
+        flowCount++;
+    }
+    // Gaps
+    const gaps = cl ? (cl['gaps'] ?? []) : [];
+    for (const g of gaps.slice(0, 5)) {
+        const gap = g;
+        flowRows.push(`<div class="flow-chain flow-gap">
+      <div class="flow-step flow-frontend">
+        <span class="flow-icon">🎨</span>
+        <span class="mono">${escapeHtml(String(gap['fromFile'] ?? '').split('/').pop() ?? '')}</span>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step flow-api">
+        <span class="flow-icon">📡</span>
+        <span class="mono">${escapeHtml(String(gap['method'] ?? ''))} ${escapeHtml(String(gap['endpoint'] ?? gap['path'] ?? ''))}</span>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step flow-missing">
+        <span class="flow-icon">❌</span>
+        <span>backend não encontrado</span>
+      </div>
+      <div class="flow-conf">🔴 <span class="badge badge-red">LACUNA</span></div>
+    </div>`);
+    }
+    return `<section class="section">
+    <div class="kicker">Fluxos</div>
+    <h2>Fluxos Detectados</h2>
+    <p class="caption">Rastreamento de tela/componente → API → controller → banco. Fonte: <code>cross-project-links.json</code>, <code>frontend-api-index.json</code>, <code>backend-endpoint-index.json</code></p>
+    <div class="flow-list">${flowRows.join('')}</div>
+    <div class="confidence-legend" style="margin-top:12px">
+      <span class="badge badge-green">🟢 Confirmado</span>
+      <span class="badge badge-yellow">🟡 Inferido</span>
+      <span class="badge badge-red">🔴 Lacuna</span>
+    </div>
+  </section>`;
+}
+// ─── 5. Impact Summary ──────────────────────────────────────────────────────
 function renderImpactSummary(impactData) {
     const impact = impactData?.latestImpact;
+    const imageIndex = impactData?.latestImageIndex ?? null;
     if (!impact) {
         return `<div class="impact-empty">
-      <span class="badge badge-gray">Nenhuma analise executada</span>
+      <span class="badge badge-gray">Nenhuma análise executada</span>
       <strong>Pronto para fingerprint visual</strong>
-      <p class="caption">Importe um screenshot ou preencha as pistas da tela para gerar frontend, API, backend e SQL/PLSQL provaveis.</p>
+      <p class="caption">Importe um screenshot ou preencha as pistas da tela para gerar frontend, API, backend e SQL/PLSQL prováveis.</p>
+      <div class="actions visual-actions" style="margin-top:8px">
+        <button class="btn primary" data-command="importImpactScreenshot">Importar Screenshot</button>
+      </div>
+      ${renderVisualEvidenceBlock(null)}
     </div>`;
     }
     const filesToReview = impact.impactEstimate.recommendedFilesToReview ?? [];
@@ -441,7 +821,7 @@ function renderImpactSummary(impactData) {
     const cost = impactData?.latestCostEstimate;
     const metadata = impact.fingerprint.screenshotMetadata;
     const visual = impact.fingerprint.visualRecognition;
-    const dimension = metadata.width && metadata.height ? `${metadata.width}x${metadata.height}` : 'N/A';
+    const dimension = metadata.width && metadata.height ? `${metadata.width}x${metadata.height}` : 'não disponível';
     return `
     <div class="impact-scoreboard">
       <div class="score-tile strong"><span>${impact.impactEstimate.score}</span><small>score</small></div>
@@ -451,127 +831,233 @@ function renderImpactSummary(impactData) {
     </div>
     <div class="pill-list" style="margin-top:10px">
       <span class="badge badge-blue">Impacto ${escapeHtml(impact.impactEstimate.level)}</span>
-      <span class="badge badge-gray">Esforco ${escapeHtml(impact.impactEstimate.estimatedEffort.label)}</span>
-      <span class="badge badge-gray">${escapeHtml(metadata.confidence ?? 'GAP')}</span>
+      <span class="badge badge-gray">Esforço ${escapeHtml(impact.impactEstimate.estimatedEffort.label)}</span>
+      <span class="badge badge-gray">${escapeHtml(metadata.confidence ?? 'não determinado')}</span>
     </div>
+    <p class="caption" style="margin-top:6px">Fonte: <code>impact/latest-screen-impact.json</code></p>
     <ul class="impact-list">
-      <li><span>URL</span><span class="caption mono">${escapeHtml(impact.input.url ?? 'N/A')}</span></li>
-      <li><span>Tela inferida</span><span class="caption">${escapeHtml(visual?.probableScreen ?? impact.input.userHints.screenName ?? 'N/A')}</span></li>
-      <li><span>Dimensao</span><span class="caption mono">${escapeHtml(dimension)} / ${escapeHtml(metadata.viewport ?? 'N/A')}</span></li>
-      <li><span>Assinatura</span><span class="caption mono">${escapeHtml(metadata.visualSignature ?? 'N/A')}</span></li>
-      <li><span>Screenshot</span><span class="caption mono">${escapeHtml(impact.input.screenshotFileName ?? 'N/A')}</span></li>
+      <li><span>URL</span><span class="caption mono">${escapeHtml(impact.input.url ?? 'não informada')}</span></li>
+      <li><span>Tela inferida</span><span class="caption">${escapeHtml(visual?.probableScreen ?? impact.input.userHints.screenName ?? 'não inferida')}</span></li>
+      <li><span>Dimensão</span><span class="caption mono">${escapeHtml(dimension)} / ${escapeHtml(metadata.viewport ?? 'não disponível')}</span></li>
+      <li><span>Assinatura</span><span class="caption mono">${escapeHtml(metadata.visualSignature ?? 'não gerada')}</span></li>
+      <li><span>Screenshot</span><span class="caption mono">${escapeHtml(impact.input.screenshotFileName ?? 'não importado')}</span></li>
     </ul>
     <div class="trace-rail" aria-label="Fluxo visual">
       <span>Frontend</span><span>API</span><span>Backend</span><span>SQL</span><span>PLSQL</span>
     </div>
-    <p class="caption" style="margin-top:8px"><strong>Arquivos provaveis:</strong> ${filesToEdit.map((f) => escapeHtml(f.file)).join(', ') || 'N/A'}</p>
-    <p class="caption"><strong>Arquivos para revisar:</strong> ${filesToReview.map((f) => escapeHtml(f)).join(', ') || 'N/A'}</p>
-    <p class="caption"><strong>Riscos:</strong> ${impact.impactEstimate.risks.map((r) => escapeHtml(r)).join(' | ') || 'N/A'}</p>
-    <p class="caption"><strong>Perguntas:</strong> ${impact.questions.map((q) => escapeHtml(q)).join(' | ') || 'N/A'}</p>
+    <p class="caption" style="margin-top:8px"><strong>Arquivos prováveis:</strong> ${filesToEdit.map((f) => escapeHtml(f.file)).join(', ') || 'nenhum detectado'}</p>
+    <p class="caption"><strong>Arquivos para revisar:</strong> ${filesToReview.map((f) => escapeHtml(f)).join(', ') || 'nenhum'}</p>
+    <p class="caption"><strong>Riscos:</strong> ${impact.impactEstimate.risks.map((r) => escapeHtml(r)).join(' | ') || 'nenhum detectado'}</p>
+    <p class="caption"><strong>Perguntas:</strong> ${impact.questions.map((q) => escapeHtml(q)).join(' | ') || 'nenhuma'}</p>
     ${visual ? `<p class="caption"><strong>Sinais visuais:</strong> ${visual.signals.map((signal) => escapeHtml(signal)).join(' | ')}</p>` : ''}
-    ${cost ? `<p class="caption"><strong>Estimativa IA Local:</strong> modelo ${escapeHtml(String(cost.model ?? 'N/A'))}, resposta ${escapeHtml(String(cost.response ?? 'N/A'))} - <code>.tic-code/impact/latest-cost-estimate.md</code></p>` : ''}
+    ${cost ? `<p class="caption"><strong>Estimativa IA Local:</strong> modelo ${escapeHtml(String(cost.model ?? 'não informado'))}, resposta ${escapeHtml(String(cost.response ?? 'não disponível'))} - <code>.tic-code/impact/latest-cost-estimate.md</code></p>` : ''}
+    ${renderVisualEvidenceBlock(imageIndex)}
   `;
 }
-function renderChangeFirewallSection(data) {
-    const report = data?.latestReport;
-    const twin = data?.latestTwin;
-    const approval = data?.latestApprovalPack;
-    const antibodies = data?.antibodies ?? [];
-    const antibodyCount = data?.antibodies ? antibodies.length : 'N/A';
-    const status = report?.verdict ?? 'Nao analisado';
-    const risk = report?.riskLevel ?? 'N/A';
-    const statusClass = report?.verdict === 'SAFE' ? 'badge-green' : report?.verdict === 'BLOCK' ? 'badge-red' : report?.verdict === 'REVIEW_REQUIRED' ? 'badge-yellow' : 'badge-gray';
-    const tests = report?.requiredTests ?? extractMarkdownBullets(data?.requiredTests).slice(0, 8);
-    const triggeredCount = report?.triggeredAntibodies.length;
-    const requiredTestsCount = report?.requiredTests.length;
-    const gapsCount = approval?.gaps.length ?? report?.gaps.length;
-    const rollback = data?.rollbackPlan ? '.tic-code/change-firewall/latest-rollback-plan.md' : 'N/A';
-    return `<section class="section premium change-firewall">
+function renderVisualEvidenceBlock(imageIndex) {
+    if (!imageIndex) {
+        return `<div class="detail" style="margin-top:12px;padding:10px;border:1px solid var(--vscode-editorHint-border,#555)">
+      <strong>Evidência Visual</strong>
+      <p class="caption" style="margin-top:4px">Nenhuma evidência visual importada ainda.</p>
+      <div class="actions visual-actions" style="margin-top:8px">
+        <button class="btn primary" data-command="importImpactScreenshot">Importar Screenshot</button>
+      </div>
+    </div>`;
+    }
+    const lv = imageIndex.localVision;
+    const hasScreenshot = Boolean(imageIndex.screenshotPath);
+    const visionAttempted = lv.attempted;
+    const visionEnabled = lv.enabled;
+    const readyForPaidAi = hasScreenshot;
+    let visionStatus;
+    let visionBadgeClass;
+    if (visionAttempted) {
+        visionStatus = `Executado (${escapeHtml(lv.model ?? 'não informado')})`;
+        visionBadgeClass = 'badge-green';
+    }
+    else if (visionEnabled) {
+        visionStatus = 'Habilitado / não executado';
+        visionBadgeClass = 'badge-yellow';
+    }
+    else if (!lv.model && lv.warnings.some((w) => w.includes('modelo'))) {
+        visionStatus = 'Modelo ausente';
+        visionBadgeClass = 'badge-red';
+    }
+    else {
+        visionStatus = 'Desativado';
+        visionBadgeClass = 'badge-gray';
+    }
+    const visibleTexts = lv.visibleText.slice(0, 6).map((t) => escapeHtml(t)).join(', ') || 'nenhum';
+    const uiElements = lv.uiElements.slice(0, 6).map((e) => escapeHtml(e)).join(', ') || 'nenhum';
+    const actions = lv.actions.slice(0, 4).map((a) => escapeHtml(a)).join(', ') || 'nenhuma';
+    const visionLocalNote = visionAttempted
+        ? `<p class="caption" style="margin-top:4px">Reconhecimento visual local executado.</p>
+       <ul class="impact-list" style="margin-top:6px">
+         <li><span>Textos visíveis</span><span class="caption">${visibleTexts}</span></li>
+         <li><span>Elementos UI</span><span class="caption">${uiElements}</span></li>
+         <li><span>Ações</span><span class="caption">${actions}</span></li>
+         ${lv.warnings.length ? `<li><span>Avisos</span><span class="caption">${lv.warnings.map((w) => escapeHtml(w)).join(' | ')}</span></li>` : ''}
+       </ul>`
+        : `<p class="caption" style="margin-top:4px">Imagem indexada. Reconhecimento real da imagem não executado. Use IA paga com visão anexando a imagem, ou ative visão local com <code>qwen2.5vl:3b</code>.</p>`;
+    return `<div class="detail" style="margin-top:12px;padding:10px;border:1px solid var(--vscode-editorHint-border,#555)">
+    <strong>Evidência Visual</strong>
+    <div class="pill-list" style="margin-top:6px">
+      <span class="badge ${hasScreenshot ? 'badge-green' : 'badge-gray'}">Screenshot: ${hasScreenshot ? 'importado' : 'não importado'}</span>
+      <span class="badge ${imageIndex.fingerprintPath ? 'badge-green' : 'badge-gray'}">Fingerprint: ${imageIndex.fingerprintPath ? 'gerado' : 'não gerado'}</span>
+      <span class="badge ${visionBadgeClass}">Visão local: ${visionStatus}</span>
+      <span class="badge ${readyForPaidAi ? 'badge-green' : 'badge-gray'}">IA paga com visão: ${readyForPaidAi ? 'sim' : 'não'}</span>
+    </div>
+    <ul class="impact-list" style="margin-top:8px">
+      <li><span>Image Index</span><span class="caption mono">${escapeHtml(imageIndex.fingerprintPath ? `.tic-code/visual-index/screenshots/${imageIndex.id}/image-index.json` : 'não gerado')}</span></li>
+      <li><span>Caminho</span><span class="caption mono">${escapeHtml(imageIndex.relativeScreenshotPath ?? imageIndex.screenshotFileName ?? 'não disponível')}</span></li>
+    </ul>
+    ${visionLocalNote}
+    <div class="actions visual-actions" style="margin-top:8px">
+      <button class="btn primary" data-command="importImpactScreenshot">Importar Screenshot</button>
+      ${hasScreenshot ? `<button class="btn" data-command="openLatestImpactScreenshot">Abrir Screenshot</button>` : ''}
+      <button class="btn" data-command="openImageIndex">Abrir Image Index</button>
+      <button class="btn" data-command="openVisualIndex">Abrir Visual Index</button>
+      <button class="btn" data-command="exportChangePackageForPaidAi">Exportar Pacote para IA Paga</button>
+    </div>
+  </div>`;
+}
+// ─── 6. Dependency Impact ────────────────────────────────────────────────────
+function renderDepImpactSection(data) {
+    const result = data?.latestResult ?? null;
+    const baselines = data?.baselines ?? [];
+    const hasBaseline = baselines.length > 0;
+    const hasResult = result !== null;
+    const impactBadge = (level) => {
+        if (!level)
+            return '';
+        const cls = level === 'CRITICAL' ? 'badge-red' : level === 'HIGH' ? 'badge-red' : level === 'MEDIUM' ? 'badge-yellow' : 'badge-green';
+        return `<span class="badge ${cls}">${escapeHtml(level)}</span>`;
+    };
+    const recBadge = (rec) => {
+        if (!rec)
+            return '';
+        const cls = rec === 'BLOCK' ? 'badge-red' : rec === 'REVIEW_REQUIRED' ? 'badge-yellow' : 'badge-green';
+        return `<span class="badge ${cls}">${escapeHtml(rec)}</span>`;
+    };
+    const baselineCards = hasBaseline
+        ? `<div class="setup-grid">${baselines.map(b => `
+      <div class="card setup-card">
+        <strong>${escapeHtml(b.projectId || 'Projeto')}</strong>
+        <p class="caption">${escapeHtml(b.language || 'linguagem não detectada')} · Runtime: ${escapeHtml(b.runtimeVersion || 'não detectado')}</p>
+        <span class="badge badge-gray">${escapeHtml(b.runtimeVersionConfidence || 'não determinado')}</span>
+        <span class="cockpit-source">Fonte: dependency-impact/baseline.json</span>
+      </div>`).join('')}</div>`
+        : `<div class="empty-state"><p>Baseline não detectado. Rode <strong>Analisar Workspace</strong> primeiro.</p></div>`;
+    const resultBlock = hasResult ? `
+    <div class="detail" style="margin-top:12px">
+      <h3>Última Análise de Impacto</h3>
+      <div class="pill-list" style="margin-top:8px">
+        ${impactBadge(result.impactLevel)}
+        <span class="badge badge-gray">Score: ${result.score}</span>
+        ${recBadge(result.approvalRecommendation)}
+      </div>
+      <ul class="impact-list" style="margin-top:8px">
+        <li><span>Arquivos afetados</span><span class="caption">${result.affectedFiles?.length ?? 0}</span></li>
+        <li><span>Achados de compatibilidade</span><span class="caption">${result.compatibilityFindings?.length ?? 0}</span></li>
+        <li><span>Riscos de quebra</span><span class="caption">${result.breakingRisks?.length ?? 0}</span></li>
+      </ul>
+      <span class="cockpit-source">Fonte: dependency-impact/latest-dependency-impact.json</span>
+      <div class="actions visual-actions" style="margin-top:8px">
+        <button class="btn" data-command="openDepImpactReport">Relatório</button>
+        <button class="btn" data-command="openDepImpactMigrationPlan">Plano de Migração</button>
+        <button class="btn" data-command="openDepImpactApprovalPack">Approval Pack</button>
+      </div>
+    </div>` : `<div class="empty-state" style="margin-top:12px"><p>Nenhuma análise de impacto de dependência executada.</p></div>`;
+    return `
+  <section class="section">
     <div class="section-head">
       <div>
-        <div class="kicker">AI Change Firewall</div>
-        <h2>Change Twin + Legacy Immune System + Legacy Antibodies</h2>
-        <p class="caption">Camada local-first para simular mudancas e validar diff atual antes de aceitar alteracoes em legado.</p>
+        <div class="kicker">Dependency Change Impact</div>
+        <h2>Impacto de Mudança de Dependência</h2>
+        <p class="caption">Analise o impacto de upgrades de dependências no seu workspace.</p>
       </div>
       <div class="actions">
-        <button class="btn primary" data-command="runChangeFirewallOnGitDiff">Validar Diff Atual</button>
-        <button class="btn" data-command="runChangeTwin">Simular Mudanca</button>
-        <button class="btn" data-command="generateLegacyAntibodies">Gerar Antibodies</button>
+        <button class="btn primary" data-command="analyzeDependencyChange">Analisar Mudança de Dependência</button>
       </div>
     </div>
-    <div class="metrics premium-metrics">
-      <div class="card"><span class="value"><span class="badge ${statusClass}">${escapeHtml(status)}</span></span><span class="label">Status</span></div>
-      ${metric('Risco', risk)}
-      ${metric('Score', report?.score ?? 'N/A')}
-      ${metric('Antibodies gerados', antibodyCount)}
-    </div>
-    <div class="setup-grid">
-      <div class="card setup-card">
-        <strong>Change Twin</strong>
-        <p class="caption">${twin ? `${twin.predictedFilesToEdit.length} arquivo(s) previstos para edicao.` : 'Simule antes de codar sem alterar codigo real.'}</p>
-        <button class="btn" data-command="runChangeTwin">Simular Mudanca</button>
-      </div>
-      <div class="card setup-card">
-        <strong>Legacy Immune System</strong>
-        <p class="caption">Cruza contratos, regras, permissoes, banco, riscos, grafo e impacto por tela.</p>
-        <button class="btn" data-command="openReverseEngineeringFolder">Abrir reverse-engineering</button>
-      </div>
-      <div class="card setup-card">
-        <strong>Legacy Antibodies</strong>
-        <p class="caption">${antibodies.length ? `${antibodies.length} protecao(oes) gerada(s).` : 'Nenhum antibody gerado ainda.'}</p>
-        <button class="btn" data-command="openLegacyAntibodies">Abrir Antibodies</button>
-      </div>
-      <div class="card setup-card">
-        <strong>Change Safety Report</strong>
-        <p class="caption">${report ? `Ultimo veredito: ${report.verdict}/${report.riskLevel}.` : 'Nenhuma mudanca foi validada pelo AI Change Firewall ainda.'}</p>
-        <button class="btn" data-command="openChangeFirewallReport">Abrir Relatorio</button>
-      </div>
-      <div class="card setup-card">
-        <strong>Change Approval Pack</strong>
-        <p class="caption">${approval ? `Recomendacao: ${approval.recommendation}.` : 'nao gerado ainda'}</p>
-        <button class="btn" data-command="generateChangeApprovalPack">Gerar Pacote de Aprovacao</button>
-        <button class="btn" data-command="openChangeApprovalPack">Abrir Pacote de Aprovacao</button>
-      </div>
-    </div>
-    ${report ? `<div class="detail impact-panel" style="margin-top:12px">
-      <div class="pill-list">
-        <span class="badge ${statusClass}">${escapeHtml(report.verdict)}</span>
-        <span class="badge badge-gray">Risco ${escapeHtml(report.riskLevel)}</span>
-        <span class="badge badge-gray">Score ${report.score}</span>
-        <span class="badge badge-gray">Approval ${escapeHtml(approval?.recommendation ?? 'nao gerado')}</span>
-      </div>
-      <ul class="impact-list">
-        <li><span>Arquivos alterados</span><span class="caption mono">${escapeHtml(report.changedFiles.slice(0, 8).join(', ') || 'N/A')}</span></li>
-        <li><span>Antibodies acionados</span><span class="caption">${triggeredCount === undefined ? 'N/A' : triggeredCount} ${escapeHtml(report.triggeredAntibodies.map((item) => item.name).join(', ') || 'Nenhum')}</span></li>
-        <li><span>Testes obrigatorios</span><span class="caption">${requiredTestsCount === undefined ? 'N/A' : requiredTestsCount} ${escapeHtml(tests.join(' | ') || 'N/A')}</span></li>
-        <li><span>Lacunas pendentes</span><span class="caption">${gapsCount === undefined ? 'N/A' : gapsCount}</span></li>
-        <li><span>Rollback</span><span class="caption mono">${escapeHtml(rollback)}</span></li>
-        <li><span>Perguntas</span><span class="caption">${escapeHtml(report.questions.join(' | ') || 'N/A')}</span></li>
-      </ul>
-      <div class="actions visual-actions">
-        <button class="btn" data-command="openChangeFirewallReport">Abrir Relatorio</button>
-        <button class="btn" data-command="exportAiReviewPrompt">Exportar Prompt de Revisao</button>
-        <button class="btn" data-command="openLegacyAntibodies">Abrir Antibodies</button>
-        <button class="btn" data-command="generateChangeApprovalPack">Gerar Pacote de Aprovacao</button>
-        <button class="btn" data-command="openChangeApprovalPack">Abrir Pacote de Aprovacao</button>
-      </div>
-    </div>` : `<div class="detail impact-panel" style="margin-top:12px">
-      <div class="impact-empty">
-        <span class="badge badge-gray">Nao analisado</span>
-        <strong>Nenhuma mudanca foi validada pelo AI Change Firewall ainda.</strong>
-        <p class="caption">Execute Change Twin para simular ou Validar Diff Atual para gerar o relatorio de seguranca.</p>
-      </div>
-    </div>`}
+    <h3>Baseline Detectado</h3>
+    ${baselineCards}
+    ${resultBlock}
   </section>`;
 }
-function extractMarkdownBullets(markdown) {
-    if (!markdown)
-        return [];
-    return markdown.split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.startsWith('- '))
-        .map((line) => line.slice(2));
+// ─── 8. Reversa Engine Section ───────────────────────────────────────────────
+function renderReversaEngineSection(summary, reversaData) {
+    const analysisRan = summary.totalFiles > 0;
+    const graphNodes = Array.isArray(reversaData?.graph?.nodes) ? reversaData?.graph?.nodes.length : summary.graph.stats.nodeCount;
+    const graphEdges = Array.isArray(reversaData?.graph?.edges) ? reversaData?.graph?.edges.length : summary.graph.stats.edgeCount;
+    const moduleCount = Array.isArray(reversaData?.modules) ? reversaData?.modules.length : summary.inventory.modules.length;
+    const riskCount = Array.isArray(reversaData?.risks) ? reversaData?.risks.length : summary.risks.summary.total;
+    const generatedFileCount = 8;
+    const phases = [
+        { id: 'reversa', label: 'Reversa', icon: '🧭', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'scout', label: 'Scout', icon: '🔍', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'archaeologist', label: 'Archaeologist', icon: '⛏️', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'detective', label: 'Detective', icon: '🕵️', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'architect', label: 'Architect', icon: '🏗️', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'writer', label: 'Writer', icon: '📝', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'tracer', label: 'Tracer', icon: '📈', status: 'pending', executionMode: 'user-input', requiredInputs: ['logs/traces .log/.txt/.json/.ndjson'], generatedFiles: ['dynamic.md', 'runtime-evidence.md'] },
+        { id: 'visor', label: 'Visor', icon: '🖼️', status: 'pending', executionMode: 'user-input', requiredInputs: ['screenshots .png/.jpg/.jpeg/.webp'], generatedFiles: ['screenshots-index.md', 'ui-analysis.md', 'user-flows.md', 'screenshots-analysis.json'] },
+        { id: 'data-master', label: 'Data Master', icon: '🗄️', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'design-system', label: 'Design System', icon: '🎨', status: analysisRan ? 'completed' : 'pending' },
+        { id: 'chronicler', label: 'Chronicler', icon: '📚', status: analysisRan ? 'completed' : 'pending', executionMode: 'deterministic', requiredInputs: [], generatedFiles: ['session.md', 'history.json', 'changelog.md'] }
+    ];
+    const statusBadge = (s) => {
+        if (s === 'completed')
+            return '<span class="badge badge-green">✅ Executado</span>';
+        return '<span class="badge badge-gray">⏳ Pendente</span>';
+    };
+    const fileStatus = (generated) => generated
+        ? '<span class="badge badge-green">✅ Gerado</span>'
+        : '<span class="badge badge-gray">⏳ Pendente</span>';
+    const generatedFiles = [
+        { path: '.tic-code/reversa/state.json', icon: '📊', generated: analysisRan },
+        { path: '.tic-code/reversa/config.json', icon: '⚙️', generated: analysisRan },
+        { path: '.tic-code/reversa/plan.md', icon: '📋', generated: analysisRan },
+        { path: '.tic-code/reversa/context/surface.json', icon: '🗺️', generated: analysisRan },
+        { path: '.tic-code/reversa/context/modules.json', icon: '📦', generated: analysisRan },
+        { path: '.tic-code/reversa/context/graph.json', icon: '🕸️', generated: analysisRan },
+        { path: '.tic-code/reversa/context/risks.json', icon: '⚠️', generated: analysisRan },
+        { path: '.tic-code/reverse-engineering/', icon: '📁', generated: analysisRan }
+    ];
+    return `<section class="section">
+    <div class="kicker">Reversa Engine</div>
+    <h2>Arquivos Gerados / Evidências</h2>
+    <p class="caption">Motor de programação reversa embutido. Pipeline gera contexto em <code>.tic-code/reversa/</code>.</p>
+    <div class="metrics">
+      ${metric('Agentes mapeados', '12 / 12')}
+      ${metric('Módulos', moduleCount)}
+      ${metric('Riscos', riskCount)}
+      ${metric('Arquivos gerados', generatedFileCount)}
+      ${metric('Nós do grafo', graphNodes)}
+      ${metric('Arestas do grafo', graphEdges)}
+    </div>
+    <details>
+      <summary style="cursor:pointer;font-weight:600;margin-bottom:8px">Fases da Metodologia Reversa (${phases.filter(p => p.status === 'completed').length}/${phases.length} executadas)</summary>
+      <div class="phase-grid">
+        ${phases.map((p) => `<div class="phase-item"><span>${p.icon}</span><span><strong>${p.label}</strong></span>${statusBadge(p.status)}<div class="caption">Modo: ${p.executionMode ?? 'deterministic'}</div><div class="caption">Inputs: ${(p.requiredInputs ?? []).join(', ') || 'nenhum'}</div><div class="caption">Arquivos: ${(p.generatedFiles ?? []).join(', ') || 'n/a'}</div>${p.id === 'tracer' ? '<button class=\"btn\" data-command=\"importTracerInputs\">Importar Logs/Traces</button>' : ''}${p.id === 'visor' ? '<button class=\"btn\" data-command=\"importVisorScreenshots\">Importar Screenshots</button>' : ''}</div>`).join('\n        ')}
+      </div>
+    </details>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;font-weight:600;margin-bottom:8px">Arquivos Gerados (${generatedFiles.filter(f => f.generated).length}/${generatedFiles.length})</summary>
+      <div class="links-grid">
+        ${generatedFiles.map((f) => `<div class="link-item"><span>${f.icon}</span> <code>${f.path}</code> ${fileStatus(f.generated)}</div>`).join('\n        ')}
+      </div>
+    </details>
+    <div class="confidence-legend" style="margin-top:10px">
+      <span class="badge badge-green">🟢 CONFIRMADO</span>
+      <span class="badge badge-yellow">🟡 INFERIDO</span>
+      <span class="badge badge-red">🔴 LACUNA</span>
+    </div>
+    ${reversaData?.state ? '<p class="caption">Dados reais carregados de state.json/context/*.json.</p>' : '<p class="caption">Execute uma análise para preencher dados do Reversa.</p>'}
+  </section>`;
 }
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function renderLocalAiLog(log) {
     if (!log || log.length === 0) {
         return '<p class="caption" style="margin-top:8px">Nenhuma execução de IA Local registrada ainda.</p>';
@@ -585,8 +1071,8 @@ function renderLocalAiLog(log) {
     return `
     <details style="margin-top:10px">
       <summary class="caption" style="cursor:pointer">📋 Modelos usados na última execução</summary>
-      <table style="width:100%;margin-top:6px;border-collapse:collapse;font-size:0.85em">
-        <thead><tr><th style="text-align:left">Tarefa</th><th style="text-align:left">Modelo</th><th style="text-align:left">Motivo</th></tr></thead>
+      <table class="data-table" style="margin-top:6px">
+        <thead><tr><th>Tarefa</th><th>Modelo</th><th>Motivo</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </details>`;
@@ -629,83 +1115,14 @@ function findHighRiskFiles(summary) {
 }
 function riskLabel(value) {
     return {
-        critical: 'critico',
+        critical: 'crítico',
         high: 'alto',
-        medium: 'medio',
+        medium: 'médio',
         low: 'baixo'
     }[value] ?? value;
 }
 function safeJson(value) {
     return JSON.stringify(value).replaceAll('</', '<\\/');
-}
-function renderReversaEngineSection(summary, reversaData) {
-    const analysisRan = summary.totalFiles > 0;
-    const graphNodes = Array.isArray(reversaData?.graph?.nodes) ? reversaData?.graph?.nodes.length : summary.graph.stats.nodeCount;
-    const graphEdges = Array.isArray(reversaData?.graph?.edges) ? reversaData?.graph?.edges.length : summary.graph.stats.edgeCount;
-    const moduleCount = Array.isArray(reversaData?.modules) ? reversaData?.modules.length : summary.inventory.modules.length;
-    const riskCount = Array.isArray(reversaData?.risks) ? reversaData?.risks.length : summary.risks.summary.total;
-    const generatedFileCount = 8;
-    const phases = [
-        { id: 'reversa', label: 'Reversa', icon: '🧭', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'scout', label: 'Scout', icon: '🔍', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'archaeologist', label: 'Archaeologist', icon: '⛏️', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'detective', label: 'Detective', icon: '🕵️', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'architect', label: 'Architect', icon: '🏗️', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'writer', label: 'Writer', icon: '📝', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'tracer', label: 'Tracer', icon: '📈', status: 'pending', executionMode: 'user-input', requiredInputs: ['logs/traces .log/.txt/.json/.ndjson'], generatedFiles: ['dynamic.md', 'runtime-evidence.md'] },
-        { id: 'visor', label: 'Visor', icon: '🖼️', status: 'pending', executionMode: 'user-input', requiredInputs: ['screenshots .png/.jpg/.jpeg/.webp'], generatedFiles: ['screenshots-index.md', 'ui-analysis.md', 'user-flows.md', 'screenshots-analysis.json'] },
-        { id: 'data-master', label: 'Data Master', icon: '🗄️', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'design-system', label: 'Design System', icon: '🎨', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'chronicler', label: 'Chronicler', icon: '📚', status: analysisRan ? 'completed' : 'pending', executionMode: 'deterministic', requiredInputs: [], generatedFiles: ['session.md', 'history.json', 'changelog.md'] }
-    ];
-    const statusBadge = (s) => {
-        if (s === 'completed')
-            return '<span class="badge badge-green">✅ Executado</span>';
-        return '<span class="badge badge-gray">⏳ Pendente</span>';
-    };
-    const fileStatus = (generated) => generated
-        ? '<span class="badge badge-green">✅ Gerado</span>'
-        : '<span class="badge badge-gray">⏳ Pendente</span>';
-    const generatedFiles = [
-        { path: '.tic-code/reversa/state.json', icon: '📊', generated: analysisRan },
-        { path: '.tic-code/reversa/config.json', icon: '⚙️', generated: analysisRan },
-        { path: '.tic-code/reversa/plan.md', icon: '📋', generated: analysisRan },
-        { path: '.tic-code/reversa/context/surface.json', icon: '🗺️', generated: analysisRan },
-        { path: '.tic-code/reversa/context/modules.json', icon: '📦', generated: analysisRan },
-        { path: '.tic-code/reversa/context/graph.json', icon: '🕸️', generated: analysisRan },
-        { path: '.tic-code/reversa/context/risks.json', icon: '⚠️', generated: analysisRan },
-        { path: '.tic-code/reverse-engineering/', icon: '📁', generated: analysisRan }
-    ];
-    return `<section class="section premium">
-    <h2>Reversa Engine — TIC Coder Lite</h2>
-    <p class="caption">Motor de programação reversa embutido. Pipeline gera contexto em <code>.tic-code/reversa/</code>.</p>
-    <div class="metrics premium-metrics">
-      ${metric('Agentes mapeados', '12 / 12')}
-      ${metric('Módulos', moduleCount)}
-      ${metric('Riscos', riskCount)}
-      ${metric('Arquivos gerados', generatedFileCount)}
-      ${metric('Nós do grafo', graphNodes)}
-      ${metric('Arestas do grafo', graphEdges)}
-    </div>
-    <div class="card">
-      <h3>Fases da Metodologia Reversa</h3>
-      <div class="phase-grid">
-        ${phases.map((p) => `<div class="phase-item"><span>${p.icon}</span><span><strong>${p.label}</strong></span>${statusBadge(p.status)}<div class="caption">Modo: ${p.executionMode ?? 'deterministic'}</div><div class="caption">Inputs: ${(p.requiredInputs ?? []).join(', ') || 'nenhum'}</div><div class="caption">Arquivos: ${(p.generatedFiles ?? []).join(', ') || 'n/a'}</div>${p.id === 'tracer' ? '<button class=\"btn\" data-command=\"importTracerInputs\">Importar Logs/Traces</button>' : ''}${p.id === 'visor' ? '<button class=\"btn\" data-command=\"importVisorScreenshots\">Importar Screenshots</button>' : ''}</div>`).join('\n        ')}
-      </div>
-      <h3>Arquivos Gerados</h3>
-      <div class="links-grid">
-        ${generatedFiles.map((f) => `<div class="link-item"><span>${f.icon}</span> <code>${f.path}</code> ${fileStatus(f.generated)}</div>`).join('\n        ')}
-      </div>
-      <h3>Escala de Confiança</h3>
-      <div class="confidence-legend">
-        <span class="badge badge-green">🟢 CONFIRMADO</span>
-        <span class="badge badge-yellow">🟡 INFERIDO</span>
-        <span class="badge badge-red">🔴 LACUNA</span>
-      </div>
-      ${reversaData?.state ? '<p class="caption">Dados reais carregados de state.json/context/*.json.</p>' : '<p class="caption">Fallback elegante ativo: execute uma análise para preencher dados do Reversa.</p>'}
-    </div>
-  </section>`;
 }
 function escapeHtml(value) {
     return value

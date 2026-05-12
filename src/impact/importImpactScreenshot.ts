@@ -6,6 +6,7 @@ import { buildScreenFingerprint } from './screenFingerprint';
 import { ScreenImpactInput } from './impactTypes';
 import { normalizeRoute } from './routeMatcher';
 import { getScreenDir, writeLatestScreenInput, writeScreenInput } from './screenInputStore';
+import { buildImageIndexEntry, updateVisorIntegration, updateVisualIndex, writeImageIndexEntry, writeLatestImageIndex } from './visualIndexBuilder';
 
 export async function importImpactScreenshotCommand(): Promise<ScreenImpactInput | undefined> {
   const root = vscode.workspace.workspaceFolders?.[0];
@@ -67,6 +68,14 @@ export async function importImpactScreenshotCommand(): Promise<ScreenImpactInput
   await writeLatestScreenInput(root, input);
   const fingerprint = buildScreenFingerprint(input);
   await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(dir, 'screen-fingerprint.json'), Buffer.from(JSON.stringify(fingerprint, null, 2), 'utf8'));
+
+  // Visual Evidence Index
+  const entry = buildImageIndexEntry(root, input, fingerprint);
+  await writeImageIndexEntry(root, entry);
+  await updateVisualIndex(root, entry);
+  await writeLatestImageIndex(root, entry);
+  await updateVisorIntegration(root, entry);
+
   return input;
 }
 

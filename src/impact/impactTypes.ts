@@ -46,7 +46,10 @@ export interface ScreenFingerprint {
   changeDescription: string;
   userHints: ScreenHints;
   imageMode: 'local-reference';
-  visionEnabled: false;
+  visionEnabled: boolean;
+  visionAttempted: boolean;
+  visionModel?: string;
+  visionProvider?: string;
   visualRecognition?: {
     probableScreen: string;
     screenType: string;
@@ -63,6 +66,60 @@ export interface ScreenFingerprint {
   candidateComponents: string[];
   candidateApiCalls: string[];
   createdAt: string;
+}
+
+// ─── Visual Evidence Index ───────────────────────────────────────────────────
+
+export interface ImageIndexEntry {
+  id: string;
+  type: 'screenshot';
+  source: 'impact-by-image' | 'visor' | 'manual';
+  screenshotPath?: string;
+  screenshotFileName?: string;
+  relativeScreenshotPath?: string;
+  extension?: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  createdAt: string;
+  url?: string;
+  normalizedRoute?: string;
+  changeDescription?: string;
+  userHints?: ScreenHints;
+  fingerprintPath?: string;
+  screenInputPath?: string;
+  impactReportPath?: string;
+  filesToEditPath?: string;
+  aiChangePackagePath?: string;
+  safePromptPath?: string;
+  relatedFiles: Array<{ file: string; reason: string; confidence: Confidence }>;
+  relatedArtifacts: Array<{ path: string; type: string }>;
+  localVision: {
+    enabled: boolean;
+    attempted: boolean;
+    model?: string;
+    confidence?: string;
+    visibleText: string[];
+    uiElements: string[];
+    actions: string[];
+    warnings: string[];
+  };
+  paidAi: {
+    attachable: true;
+    instruction: string;
+  };
+  confidence: Confidence;
+  gaps: string[];
+}
+
+export interface VisualIndex {
+  version: string;
+  generatedAt: string;
+  images: ImageIndexEntry[];
+  latestImageId?: string;
+  totalImages: number;
+  totalWithLocalVision: number;
+  totalReadyForPaidAiAttachment: number;
 }
 
 export interface FrontendScreenMatch {

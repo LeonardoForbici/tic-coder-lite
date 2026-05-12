@@ -15,6 +15,7 @@ import { rankFileEditCandidates } from './fileEditCandidateRanker';
 import { normalizeRoute } from './routeMatcher';
 import { buildScreenFingerprint } from './screenFingerprint';
 import { readLatestScreenInput } from './screenInputStore';
+import { buildImageIndexEntry, updateVisorIntegration, updateVisualIndex, writeImageIndexEntry, writeLatestImageIndex } from './visualIndexBuilder';
 
 export interface ImpactAnalysisPayload {
   url?: string;
@@ -100,6 +101,19 @@ export async function analyzeImpactByImageCommand(payload?: ImpactAnalysisPayloa
   for (const [uri, content] of writes) {
     await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
   }
+
+  // Update Visual Evidence Index with impact artifacts
+  const entry = buildImageIndexEntry(root, input, fingerprint, [
+    { path: `.tic-code/impact/screens/${input.id}/impact-by-screen.md`, type: 'impact-report' },
+    { path: `.tic-code/impact/screens/${input.id}/files-to-edit.md`, type: 'files-to-edit' },
+    { path: `.tic-code/impact/screens/${input.id}/ai-change-package.md`, type: 'ai-change-package' },
+    { path: `.tic-code/impact/screens/${input.id}/screen-fingerprint.json`, type: 'screen-fingerprint' },
+    { path: `.tic-code/impact/screens/${input.id}/screen-input.json`, type: 'screen-input' }
+  ], result.fileCandidates.slice(0, 10).map((c) => ({ file: c.file, reason: c.reason, confidence: c.confidence })));
+  await writeImageIndexEntry(root, entry);
+  await updateVisualIndex(root, entry);
+  await writeLatestImageIndex(root, entry);
+  await updateVisorIntegration(root, entry);
 
   vscode.window.showInformationMessage(`Impacto por tela: ${frontendMatches.length} match(es) frontend, score ${impactEstimate.score}.`);
 }
@@ -208,13 +222,35 @@ function generateRichAiPackageMd(result: ScreenImpactResult, filesToEditMd: stri
   const visual = result.fingerprint.visualRecognition;
   const localVision = result.fingerprint.localVision;
   const metadata = result.fingerprint.screenshotMetadata;
+  const relativeScreenshotPath = result.input.screenshotPath
+    ? result.input.screenshotPath.replace(/\\/g, '/')
+    : undefined;
   return `# Pacote Seguro para IA - Estimativa/Implementacao
 
-## Observacao sobre imagem
-A imagem esta salva localmente em:
+## Imagem relacionada
+
+Screenshot salvo localmente em:
 ${result.input.screenshotPath ?? 'N/A'}
 
-Esta IA pode nao conseguir visualizar imagens. Use os metadados textuais, reconhecimento local e rastreabilidade abaixo.
+> **Importante:** Esta IA pode não conseguir acessar arquivos locais automaticamente.
+> Se estiver usando uma IA paga com visão, **anexe manualmente esta imagem** junto com este pacote.
+
+- **ID:** ${result.input.id}
+- **Arquivo:** ${result.input.screenshotFileName ?? 'N/A'}
+- **Caminho:** ${relativeScreenshotPath ?? 'N/A'}
+- **URL relacionada:** ${result.input.url ?? 'N/A'}
+- **Mudança:** ${result.input.changeDescription}
+- **Status visão local:** ${localVision?.attempted ? `Executado (modelo: ${localVision.model ?? 'N/A'})` : 'Não executado'}
+- **Modelo vision, se usado:** ${localVision?.model ?? 'N/A'}
+
+> Não inclui base64. Não cola bytes da imagem.
+> A IA só verá a imagem se você a anexar manualmente.
+
+## Índice visual
+
+- image-index.json: \`.tic-code/visual-index/screenshots/${result.input.id}/image-index.json\`
+- visual-index/images.json: \`.tic-code/visual-index/images.json\`
+- latest-image-index.json: \`.tic-code/visual-index/latest-image-index.json\`
 
 ## Tela
 - URL: ${result.input.url ?? 'N/A'}

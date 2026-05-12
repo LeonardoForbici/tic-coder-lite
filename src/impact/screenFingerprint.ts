@@ -72,7 +72,10 @@ export function buildScreenFingerprint(input: ScreenImpactInput): ScreenFingerpr
     changeDescription: input.changeDescription,
     userHints: input.userHints,
     imageMode: 'local-reference',
-    visionEnabled: false,
+    visionEnabled: Boolean(input.localVision?.enabled),
+    visionAttempted: Boolean(input.localVision?.attempted),
+    visionModel: input.localVision?.model,
+    visionProvider: input.localVision?.provider,
     visualRecognition: recognition
       ? {
           probableScreen: recognition.probableScreen,

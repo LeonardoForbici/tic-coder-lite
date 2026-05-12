@@ -10,11 +10,12 @@ import { detectAiEnginesCommand, exportForEngineCommand } from './reversa-adapte
 import { analyzeImpactByImageCommand } from './impact/analyzeImpactByImage';
 import { importImpactScreenshotCommand } from './impact/importImpactScreenshot';
 import { estimateChangeCostWithLocalAiCommand } from './impact/changeCostEstimator';
-import { exportChangePackageForPaidAiCommand } from './impact/exportChangePackageForPaidAi';
+import { exportChangePackageForPaidAiCommand, openLatestImpactScreenshotCommand } from './impact/exportChangePackageForPaidAi';
 import { generateLegacyAntibodiesCommand } from './change-firewall/legacyAntibodyGenerator';
 import { exportAiReviewPromptCommand, openChangeFirewallReportCommand, openLegacyAntibodiesCommand } from './change-firewall/generateChangeSafetyReport';
 import { runChangeFirewallOnGitDiffCommand, runChangeTwinCommand } from './change-firewall/runChangeTwin';
 import { generateChangeApprovalPackCommand, openChangeApprovalPackCommand } from './change-firewall/generateChangeApprovalPack';
+import { analyzeDependencyChangeCommand, openDepImpactReportCommand, openDepImpactMigrationPlanCommand, openDepImpactApprovalPackCommand } from './dependency-impact/analyzeDependencyChange';
 import { ProjectSummary } from './types';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -43,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ,vscode.commands.registerCommand('ticCoderLite.importImpactScreenshot', () => importImpactScreenshotCommand())
     ,vscode.commands.registerCommand('ticCoderLite.estimateChangeCostWithLocalAi', () => estimateChangeCostWithLocalAiCommand())
     ,vscode.commands.registerCommand('ticCoderLite.exportChangePackageForPaidAi', () => exportChangePackageForPaidAiCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.openLatestImpactScreenshot', () => openLatestImpactScreenshotCommand())
     ,vscode.commands.registerCommand('ticCoderLite.runChangeTwin', () => runChangeTwinCommand())
     ,vscode.commands.registerCommand('ticCoderLite.generateLegacyAntibodies', () => generateLegacyAntibodiesCommand())
     ,vscode.commands.registerCommand('ticCoderLite.runChangeFirewallOnGitDiff', () => runChangeFirewallOnGitDiffCommand())
@@ -51,6 +53,10 @@ export function activate(context: vscode.ExtensionContext): void {
     ,vscode.commands.registerCommand('ticCoderLite.exportAiReviewPrompt', () => exportAiReviewPromptCommand())
     ,vscode.commands.registerCommand('ticCoderLite.generateChangeApprovalPack', () => generateChangeApprovalPackCommand())
     ,vscode.commands.registerCommand('ticCoderLite.openChangeApprovalPack', () => openChangeApprovalPackCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.analyzeDependencyChange', (payload) => analyzeDependencyChangeCommand(payload, context))
+    ,vscode.commands.registerCommand('ticCoderLite.openDepImpactReport', () => openDepImpactReportCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.openDepImpactMigrationPlan', () => openDepImpactMigrationPlanCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.openDepImpactApprovalPack', () => openDepImpactApprovalPackCommand())
   );
 }
 

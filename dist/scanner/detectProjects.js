@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.detectProjects = detectProjects;
+exports.detectMultipleProjects = detectMultipleProjects;
 // Padrões de detecção por tipo de projeto
 const DATABASE_DIRS = new Set(['db', 'database', 'sql', 'oracle', 'plsql', 'migrations']);
 const PLSQL_EXTENSIONS = new Set(['.sql', '.pks', '.pkb', '.prc', '.fnc', '.pkg', '.trg', '.pls', '.plsql']);
@@ -358,5 +359,130 @@ function isInfraPath(path) {
 function isSharedPath(path) {
     const lower = path.toLowerCase();
     return lower.includes('shared') || lower.includes('libs') || lower.includes('packages');
+}
+// ─── Multi-Project Root Detection ────────────────────────────────────────────
+/**
+ * Detecta múltiplos projetos reais a partir de raízes separadas no workspace.
+ * Para monorepos com workspace/ ├── frontend/ ├── backend/ ├── database/
+ * gera um projeto por raiz reconhecida, em vez de agregar tudo em "frontend" / "backend".
+ *
+ * Mantém compatibilidade com detectProjects() que retorna projetos consolidados.
+ */
+function detectMultipleProjects(scan, risks) {
+    const projects = [];
+    // Collect top-level directories that have identifying files
+    const topDirSet = new Set();
+    for (const file of scan.files) {
+        const firstSegment = file.relativePath.split('/')[0];
+        if (firstSegment && !firstSegment.startsWith('.')) {
+            topDirSet.add(firstSegment);
+        }
+    }
+    const topDirs = [...topDirSet];
+    // If workspace has only one top-level source dir, fall back to simple detection
+    const meaningfulTopDirs = topDirs.filter((d) => {
+        const dirFiles = scan.files.filter((f) => f.relativePath.startsWith(`${d}/`));
+        return dirFiles.length >= 2;
+    });
+    if (meaningfulTopDirs.length <= 1) {
+        return detectProjects(scan, risks);
+    }
+    // Scan each top-level directory for project markers
+    for (const dir of meaningfulTopDirs) {
+        const dirFiles = scan.files.filter((f) => f.relativePath.startsWith(`${dir}/`));
+        if (dirFiles.length === 0)
+            continue;
+        const dirKind = classifyTopLevelDir(dir, dirFiles);
+        if (dirKind === 'unknown')
+            continue;
+        const stack = inferStackForDir(dir, dirFiles);
+        const fileCount = dirFiles.length;
+        const riskCount = risks?.risks.filter((r) => r.file.startsWith(`${dir}/`)).length ?? 0;
+        const evidence = dirFiles.slice(0, 5).map((f) => f.relativePath);
+        projects.push({
+            id: slugify(dir),
+            name: dir,
+            rootPath: scan.rootPath,
+            relativePath: dir,
+            kind: dirKind,
+            stack,
+            evidence,
+            files: fileCount,
+            risks: riskCount
+        });
+    }
+    // If we found multi-project roots, return them; else fall back to simple detection
+    if (projects.length > 1) {
+        return projects;
+    }
+    return detectProjects(scan, risks);
+}
+function classifyTopLevelDir(dir, files) {
+    const lower = dir.toLowerCase();
+    const relPaths = files.map((f) => f.relativePath.toLowerCase());
+    // Backend signals
+    const hasJava = relPaths.some((r) => r.endsWith('.java'));
+    const hasPom = relPaths.some((r) => r.endsWith('pom.xml'));
+    const hasGradle = relPaths.some((r) => r.endsWith('build.gradle'));
+    const hasSrcMainJava = relPaths.some((r) => r.includes('src/main/java'));
+    if (hasJava || hasPom || hasGradle || hasSrcMainJava)
+        return 'backend';
+    // Frontend signals
+    const hasReact = relPaths.some((r) => r.endsWith('.tsx') || r.endsWith('.jsx'));
+    const hasVite = relPaths.some((r) => r.endsWith('vite.config.ts') || r.endsWith('vite.config.js'));
+    const hasNextConfig = relPaths.some((r) => r.endsWith('next.config.js'));
+    const hasAngular = relPaths.some((r) => r.endsWith('angular.json'));
+    const hasPackageJson = relPaths.some((r) => r.endsWith('package.json'));
+    if (lower.includes('frontend') || lower.includes('client') || lower.includes('web') || lower.includes('ui') ||
+        hasReact || hasVite || hasNextConfig || hasAngular ||
+        (hasPackageJson && !hasJava))
+        return 'frontend';
+    // Database signals
+    const hasSql = files.some((f) => ['.sql', '.pks', '.pkb', '.prc', '.fnc', '.pkg', '.trg', '.pls', '.plsql'].includes(f.extension));
+    if (hasSql || lower === 'database' || lower === 'db' || lower === 'sql')
+        return 'database';
+    // Mobile signals
+    const hasFlutter = relPaths.some((r) => r.endsWith('pubspec.yaml'));
+    const hasMobile = lower.includes('mobile') || lower.includes('app') || hasFlutter;
+    if (hasMobile)
+        return 'mobile';
+    // Shared/libs
+    if (lower === 'shared' || lower === 'libs' || lower === 'packages' || lower === 'common')
+        return 'shared';
+    // Infra
+    const hasDocker = relPaths.some((r) => r.endsWith('dockerfile') || r.includes('docker-compose'));
+    if (lower === 'infra' || lower === 'deploy' || hasDocker)
+        return 'infra';
+    return 'unknown';
+}
+function inferStackForDir(_dir, files) {
+    const stack = [];
+    const relPaths = files.map((f) => f.relativePath.toLowerCase());
+    if (relPaths.some((r) => r.endsWith('pom.xml')))
+        stack.push('Java / Maven');
+    else if (relPaths.some((r) => r.endsWith('build.gradle')))
+        stack.push('Java / Gradle');
+    else if (relPaths.some((r) => r.endsWith('.java')))
+        stack.push('Java');
+    if (relPaths.some((r) => r.endsWith('vite.config.ts') || r.endsWith('vite.config.js')))
+        stack.push('Vite');
+    if (relPaths.some((r) => r.endsWith('next.config.js')))
+        stack.push('Next.js');
+    if (relPaths.some((r) => r.endsWith('angular.json')))
+        stack.push('Angular');
+    if (relPaths.some((r) => r.endsWith('.tsx') || r.endsWith('.jsx')))
+        stack.push('React');
+    if (relPaths.some((r) => r.endsWith('package.json'))) {
+        if (stack.length === 0)
+            stack.push('JavaScript / TypeScript');
+    }
+    if (relPaths.some((r) => r.endsWith('pubspec.yaml')))
+        stack.push('Flutter');
+    if (files.some((f) => ['.sql', '.pks', '.pkb'].includes(f.extension)))
+        stack.push('SQL / PL-SQL');
+    return stack.length > 0 ? stack : ['Unknown'];
+}
+function slugify(s) {
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 //# sourceMappingURL=detectProjects.js.map

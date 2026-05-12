@@ -11,6 +11,7 @@ import { persistChangeSafetyArtifacts } from './generateChangeSafetyReport';
 import { generateGhostPatch } from './generateGhostPatch';
 import { evidenceRef } from './changeFirewallStore';
 import { generateChangeApprovalPack } from './generateChangeApprovalPack';
+import { detectChangeIntent, filterFilesByRelevance } from './changeRelevanceFilter';
 
 interface LatestScreenImpactLike {
   input?: {
@@ -50,14 +51,18 @@ export async function runChangeTwinCommand(): Promise<void> {
 
   const title = await vscode.window.showInputBox({ prompt: 'Titulo curto da mudanca', value: description.slice(0, 80) });
   const session = createSession(root);
-  const result = await runChangeTwin(root, session, {
-    description,
-    title: title || description.slice(0, 80),
-    source: useImpact === 'Sim' ? 'impact-by-screen' : 'manual',
-    latestImpact: useImpact === 'Sim' ? latestImpact : undefined
-  });
-  vscode.window.showInformationMessage(`Change Twin gerado: ${result.predictedFilesToEdit.length} arquivo(s) provaveis.`);
-  await openGeneratedFile(root, '.tic-code/change-firewall/latest-change-twin.md');
+  try {
+    const result = await runChangeTwin(root, session, {
+      description,
+      title: title || description.slice(0, 80),
+      source: useImpact === 'Sim' ? 'impact-by-screen' : 'manual',
+      latestImpact: useImpact === 'Sim' ? latestImpact : undefined
+    });
+    vscode.window.showInformationMessage(`Change Twin gerado: ${result.predictedFilesToEdit.length} arquivo(s) provaveis.`);
+    await openGeneratedFile(root, '.tic-code/change-firewall/latest-change-twin.md');
+  } catch (err) {
+    vscode.window.showErrorMessage(`Erro ao gerar Change Twin: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export async function runChangeTwin(
@@ -82,8 +87,26 @@ export async function runChangeTwin(
   const reviewFiles = input.latestImpact?.impactEstimate?.recommendedFilesToReview ?? [];
   const backendFiles = input.latestImpact?.backendFlow?.map((item) => item.file ?? '').filter(Boolean) ?? [];
   const dbFiles = input.latestImpact?.databaseImpact?.sqlFiles ?? [];
-  const predictedFilesToEdit = uniq([...candidateFiles, ...immune.filesToEdit]).slice(0, 30);
-  const predictedFilesToReview = uniq([...reviewFiles, ...backendFiles, ...dbFiles, ...immune.criticalFiles]).slice(0, 40);
+
+  // When no screen impact is available, filter the immune system files by
+  // relevance to the actual change description instead of dumping everything.
+  let predictedFilesToEdit: string[];
+  let predictedFilesToReview: string[];
+
+  if (input.latestImpact) {
+    // Screen impact path: use the files from the impact analysis directly
+    predictedFilesToEdit = uniq([...candidateFiles, ...immune.filesToEdit]).slice(0, 30);
+    predictedFilesToReview = uniq([...reviewFiles, ...backendFiles, ...dbFiles, ...immune.criticalFiles]).slice(0, 40);
+  } else {
+    // Manual description path: filter ALL immune files by relevance to the description
+    const allImmuneFiles = uniq([...immune.criticalFiles, ...immune.graphFiles, ...immune.filesToEdit]);
+    const filtered = filterFilesByRelevance(allImmuneFiles, input.description, 20, 30);
+    predictedFilesToEdit = filtered.editFiles;
+    predictedFilesToReview = filtered.reviewFiles;
+    // Tag intent so the MD report can show it
+    (request as unknown as Record<string, unknown>)['detectedIntent'] = filtered.intent;
+    (request as unknown as Record<string, unknown>)['detectedKeywords'] = filtered.keywords;
+  }
   const predictedImpactedModules = uniq([
     ...predictedFilesToEdit.map(moduleFromPath),
     ...predictedFilesToReview.map(moduleFromPath),
@@ -147,7 +170,7 @@ export async function runChangeTwin(
     implementationPlan: buildImplementationPlan(predictedFilesToEdit, predictedFilesToReview),
     safePrompt: buildSafePrompt(request, predictedFilesToEdit, predictedFilesToReview, predictedRisks),
     confidenceSummary: [
-      input.latestImpact ? 'CONFIRMED: Change Twin baseado em latest-screen-impact.json.' : 'INFERRED: Change Twin baseado em descricao manual.',
+      input.latestImpact ? 'CONFIRMED: Change Twin baseado em latest-screen-impact.json.' : `INFERRED: Change Twin baseado em descricao manual. Intenção detectada: ${detectChangeIntent(input.description)}.`,
       immune.contracts.length ? `CONFIRMED: ${immune.contracts.length} contrato(s) carregado(s).` : 'GAP: contratos operacionais ausentes.',
       immune.rules.length ? `CONFIRMED: ${immune.rules.length} regra(s) carregada(s).` : 'GAP: business-rules.md ausente.',
       immune.traceabilityLinks.length ? `CONFIRMED: ${immune.traceabilityLinks.length} link(s) de rastreabilidade carregado(s).` : 'GAP: traceability incompleta.'
