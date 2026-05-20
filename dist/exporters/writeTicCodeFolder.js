@@ -46,6 +46,11 @@ const generateReverseEngineering_1 = require("./reverseEngineering/generateRever
 const databaseLargeMode_1 = require("../scanner/databaseLargeMode");
 const config_1 = require("../utils/config");
 const runReversaLikePipeline_1 = require("../reversa-engine/runReversaLikePipeline");
+const frontendApiIndex_1 = require("../scanner/frontendApiIndex");
+const backendEndpointIndex_1 = require("../scanner/backendEndpointIndex");
+const backendDatabaseIndex_1 = require("../scanner/backendDatabaseIndex");
+const crossProjectLinks_1 = require("../scanner/crossProjectLinks");
+const projectGraph_1 = require("../scanner/projectGraph");
 async function writeTicCodeFolder(root, summary, extensionUri) {
     const ticCodeDir = vscode.Uri.joinPath(root.uri, '.tic-code');
     const artifacts = {
@@ -78,6 +83,8 @@ async function writeTicCodeFolder(root, summary, extensionUri) {
     await (0, generateReverseEngineering_1.writeReverseEngineering)(root, summary);
     // Motor Reversa — gera .tic-code/reversa/ e expande .tic-code/reverse-engineering/
     await (0, runReversaLikePipeline_1.runReversaLikePipeline)(root, summary, extensionUri);
+    // Grafo Multi-Projeto e Cross-Project Links
+    await writeMultiProjectArtifacts(root, summary);
     return artifacts;
 }
 async function writeProjectArtifacts(root, summary) {
@@ -391,5 +398,36 @@ async function writeDatabaseIndexArtifacts(_root, projectDir, summary) {
     await writeText(vscode.Uri.joinPath(projectDir, 'summary.json'), `${JSON.stringify(dbSummary, null, 2)}\n`);
     await writeText(vscode.Uri.joinPath(projectDir, 'graph.summary.json'), `${JSON.stringify(graphSummary, null, 2)}\n`);
     await writeText(vscode.Uri.joinPath(projectDir, 'critical-objects.json'), `${JSON.stringify(index.criticalObjects, null, 2)}\n`);
+}
+// ─── Multi-Project Graph Artifacts ───────────────────────────────────────────
+async function writeMultiProjectArtifacts(root, summary) {
+    const ticCodeDir = vscode.Uri.joinPath(root.uri, '.tic-code');
+    try {
+        // Use multi-project detection (respects monorepo roots)
+        const projects = (0, detectProjects_1.detectMultipleProjects)(summary.scan, summary.risks);
+        // Frontend API index
+        const frontendIndexes = await (0, frontendApiIndex_1.buildFrontendApiIndex)(summary.scan, projects);
+        await writeText(vscode.Uri.joinPath(ticCodeDir, 'frontend-api-index.json'), `${JSON.stringify(frontendIndexes, null, 2)}\n`);
+        // Backend endpoint index
+        const backendIndexes = await (0, backendEndpointIndex_1.buildBackendEndpointIndex)(summary.scan, projects);
+        await writeText(vscode.Uri.joinPath(ticCodeDir, 'backend-endpoint-index.json'), `${JSON.stringify(backendIndexes, null, 2)}\n`);
+        // Backend → Database index
+        const backendDbIndexes = await (0, backendDatabaseIndex_1.buildBackendDatabaseIndex)(summary.scan, projects);
+        await writeText(vscode.Uri.joinPath(ticCodeDir, 'backend-database-index.json'), `${JSON.stringify(backendDbIndexes, null, 2)}\n`);
+        // Cross-project links
+        const crossLinks = (0, crossProjectLinks_1.buildCrossProjectLinks)(frontendIndexes, backendIndexes, backendDbIndexes);
+        await writeText(vscode.Uri.joinPath(ticCodeDir, 'cross-project-links.json'), `${JSON.stringify(crossLinks, null, 2)}\n`);
+        // Project graph (enriched with multi-project context)
+        const projectGraph = (0, projectGraph_1.buildProjectGraph)(summary.graph, projects, frontendIndexes, backendIndexes, backendDbIndexes, crossLinks);
+        await writeText(vscode.Uri.joinPath(ticCodeDir, 'project-graph.json'), `${JSON.stringify(projectGraph, null, 2)}\n`);
+        // Traceability markdown
+        const traceabilityDir = vscode.Uri.joinPath(ticCodeDir, 'reverse-engineering', 'traceability');
+        await vscode.workspace.fs.createDirectory(traceabilityDir);
+        await writeText(vscode.Uri.joinPath(traceabilityDir, 'cross-project-links.md'), (0, crossProjectLinks_1.buildCrossProjectLinksMd)(crossLinks));
+    }
+    catch (err) {
+        // Graceful degradation — multi-project graph is additive, not critical
+        console.error('[TIC Coder Lite] writeMultiProjectArtifacts failed (non-critical):', err);
+    }
 }
 //# sourceMappingURL=writeTicCodeFolder.js.map

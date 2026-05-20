@@ -67,11 +67,14 @@ async function openOverviewPanel(context) {
     panel.webview.onDidReceiveMessage(async (message) => {
         switch (message.command) {
             case 'analyzeProject':
+            case 'analyzeWorkspace':
                 await vscode.commands.executeCommand('ticCoderLite.analyzeProject');
                 const latestAnalysis = (0, analyzeProject_1.getLastAnalysis)(context);
                 if (latestAnalysis) {
                     summary = latestAnalysis;
-                    await render(panel, context, root, summary);
+                    if (summary) {
+                        await render(panel, context, root, summary);
+                    }
                 }
                 break;
             case 'exportForCodex':
@@ -90,6 +93,7 @@ async function openOverviewPanel(context) {
                 await vscode.commands.executeCommand('ticCoderLite.exportForGemini');
                 break;
             case 'enhanceLocalAi':
+            case 'enhanceWithLocalAi':
                 await vscode.commands.executeCommand('ticCoderLite.enhanceWithLocalAi');
                 break;
             case 'setupBeginner':
@@ -112,6 +116,123 @@ async function openOverviewPanel(context) {
                 break;
             case 'importVisorScreenshots':
                 await vscode.commands.executeCommand('ticCoderLite.importVisorScreenshots');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'analyzeImpactByImage':
+                await vscode.commands.executeCommand('ticCoderLite.analyzeImpactByImage', message.payload);
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'importImpactScreenshot':
+                await vscode.commands.executeCommand('ticCoderLite.importImpactScreenshot');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'importImpactScreenshotAndAnalyze':
+                {
+                    const imported = await vscode.commands.executeCommand('ticCoderLite.importImpactScreenshot');
+                    if (imported) {
+                        await vscode.commands.executeCommand('ticCoderLite.analyzeImpactByImage', { useLatestScreenInput: true });
+                    }
+                }
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'estimateChangeCostWithLocalAi':
+                await vscode.commands.executeCommand('ticCoderLite.estimateChangeCostWithLocalAi');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'exportChangePackageForPaidAi':
+                await vscode.commands.executeCommand('ticCoderLite.exportChangePackageForPaidAi');
+                break;
+            case 'openLatestImpactScreenshot':
+                await vscode.commands.executeCommand('ticCoderLite.openLatestImpactScreenshot');
+                break;
+            case 'openVisualIndex':
+                await openFileFromWorkspace(root, '.tic-code/visual-index/images.md');
+                break;
+            case 'openImageIndex':
+                if (typeof message.screenId === 'string' && message.screenId.trim()) {
+                    await openFileFromWorkspace(root, `.tic-code/visual-index/screenshots/${message.screenId}/image-index.json`);
+                }
+                else {
+                    await openFileFromWorkspace(root, '.tic-code/visual-index/latest-image-index.json');
+                }
+                break;
+            case 'runChangeTwin':
+                await vscode.commands.executeCommand('ticCoderLite.runChangeTwin');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'generateLegacyAntibodies':
+                await vscode.commands.executeCommand('ticCoderLite.generateLegacyAntibodies');
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'openLegacyAntibodies':
+                await vscode.commands.executeCommand('ticCoderLite.openLegacyAntibodies');
+                break;
+            case 'exportAiReviewPrompt':
+                await vscode.commands.executeCommand('ticCoderLite.exportAiReviewPrompt');
+                break;
+            case 'openTicCodeFolder':
+                await openFolder(vscode.Uri.joinPath(root.uri, '.tic-code'));
+                break;
+            case 'openReverseEngineeringFolder':
+                await openFolder(vscode.Uri.joinPath(root.uri, '.tic-code', 'reverse-engineering'));
+                break;
+            case 'openGeneratedFile':
+                if (typeof message.path === 'string' && message.path.trim()) {
+                    await openFileFromWorkspace(root, message.path);
+                }
+                break;
+            case 'openImpactReport':
+                await openFileFromWorkspace(root, '.tic-code/impact/latest-screen-impact.md');
+                break;
+            case 'openImpactJson':
+                await openFileFromWorkspace(root, '.tic-code/impact/latest-screen-impact.json');
+                break;
+            case 'openFilesToEdit':
+                await openFilesToEdit(root, message.latestScreenId);
+                break;
+            case 'openAiChangePackage':
+                await openFileFromWorkspace(root, '.tic-code/impact/latest-ai-change-package.md');
+                break;
+            case 'openProjectGraph':
+                await openFileFromWorkspace(root, '.tic-code/project-graph.json');
+                break;
+            case 'openCrossProjectLinks':
+                await openFileFromWorkspace(root, '.tic-code/reverse-engineering/traceability/cross-project-links.md');
+                break;
+            case 'openFrontendApiIndex':
+                await openFileFromWorkspace(root, '.tic-code/frontend-api-index.json');
+                break;
+            case 'openBackendEndpointIndex':
+                await openFileFromWorkspace(root, '.tic-code/backend-endpoint-index.json');
+                break;
+            case 'analyzeDependencyChange':
+                await vscode.commands.executeCommand('ticCoderLite.analyzeDependencyChange', message.payload);
+                if (summary) {
+                    await render(panel, context, root, summary);
+                }
+                break;
+            case 'openDepImpactReport':
+                await vscode.commands.executeCommand('ticCoderLite.openDepImpactReport');
+                break;
+            case 'openDepImpactMigrationPlan':
+                await vscode.commands.executeCommand('ticCoderLite.openDepImpactMigrationPlan');
+                break;
+            case 'openDepImpactApprovalPack':
+                await vscode.commands.executeCommand('ticCoderLite.openDepImpactApprovalPack');
                 break;
             case 'openSettings':
                 await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tic.tic-coder-lite');
@@ -160,15 +281,103 @@ async function render(panel, context, root, summary) {
         mode: aiSettings.mode,
         enabled: aiSettings.enabled
     };
+    const reversaData = await loadReversaData(root);
+    const impactData = await loadImpactData(root);
+    const projectGraphData = await loadProjectGraphData(root);
+    const depImpactData = await loadDepImpactData(root);
     panel.webview.html = (0, overviewHtml_1.renderOverviewHtml)({
         summary,
         engines,
         agentContextPreview: agentContextPreview.slice(0, 2600),
         nonce: getNonce(),
         localAiTaskLog,
-        localAiConfig
+        localAiConfig,
+        reversaData,
+        impactData,
+        projectGraphData,
+        depImpactData
     });
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
+}
+async function loadImpactData(root) {
+    const parseJson = async (uri) => {
+        try {
+            const content = await readTextIfExists(uri);
+            if (!content.trim())
+                return null;
+            return JSON.parse(content);
+        }
+        catch {
+            return null;
+        }
+    };
+    const impactDir = vscode.Uri.joinPath(root.uri, '.tic-code', 'impact');
+    const visualIndexDir = vscode.Uri.joinPath(root.uri, '.tic-code', 'visual-index');
+    return {
+        latestImpact: await parseJson(vscode.Uri.joinPath(impactDir, 'latest-screen-impact.json')),
+        latestAiPackage: await parseJson(vscode.Uri.joinPath(impactDir, 'latest-ai-change-package.json')),
+        latestCostEstimate: await parseJson(vscode.Uri.joinPath(impactDir, 'latest-cost-estimate.json')),
+        latestFilesToEdit: await parseJson(vscode.Uri.joinPath(impactDir, 'latest-files-to-edit.json')),
+        latestImageIndex: await parseJson(vscode.Uri.joinPath(visualIndexDir, 'latest-image-index.json'))
+    };
+}
+async function loadProjectGraphData(root) {
+    const parseJson = async (uri) => {
+        try {
+            const content = await readTextIfExists(uri);
+            if (!content.trim())
+                return null;
+            return JSON.parse(content);
+        }
+        catch {
+            return null;
+        }
+    };
+    const base = vscode.Uri.joinPath(root.uri, '.tic-code');
+    return {
+        projectGraph: await parseJson(vscode.Uri.joinPath(base, 'project-graph.json')),
+        crossProjectLinks: await parseJson(vscode.Uri.joinPath(base, 'cross-project-links.json')),
+        frontendApiIndex: await parseJson(vscode.Uri.joinPath(base, 'frontend-api-index.json')),
+        backendEndpointIndex: await parseJson(vscode.Uri.joinPath(base, 'backend-endpoint-index.json')),
+        backendDatabaseIndex: await parseJson(vscode.Uri.joinPath(base, 'backend-database-index.json'))
+    };
+}
+async function loadDepImpactData(root) {
+    const parseJson = async (uri) => {
+        try {
+            const content = await readTextIfExists(uri);
+            if (!content?.trim())
+                return null;
+            return JSON.parse(content);
+        }
+        catch {
+            return null;
+        }
+    };
+    const base = vscode.Uri.joinPath(root.uri, '.tic-code', 'dependency-impact');
+    return {
+        latestResult: await parseJson(vscode.Uri.joinPath(base, 'latest-dependency-impact.json')),
+        baselines: await parseJson(vscode.Uri.joinPath(base, 'baseline.json'))
+    };
+}
+async function loadReversaData(root) {
+    const parseJson = async (uri) => {
+        try {
+            const content = await readTextIfExists(uri);
+            if (!content.trim())
+                return null;
+            return JSON.parse(content);
+        }
+        catch {
+            return null;
+        }
+    };
+    const base = vscode.Uri.joinPath(root.uri, '.tic-code', 'reversa');
+    const state = await parseJson(vscode.Uri.joinPath(base, 'state.json'));
+    const graph = await parseJson(vscode.Uri.joinPath(base, 'context', 'graph.json'));
+    const modules = await parseJson(vscode.Uri.joinPath(base, 'context', 'modules.json'));
+    const risks = await parseJson(vscode.Uri.joinPath(base, 'context', 'risks.json'));
+    return { state, graph, modules, risks };
 }
 async function readTextIfExists(uri) {
     try {
@@ -186,5 +395,39 @@ function getNonce() {
         nonce += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return nonce;
+}
+async function openFolder(uri) {
+    try {
+        await vscode.commands.executeCommand('revealFileInOS', uri);
+    }
+    catch {
+        vscode.window.showWarningMessage('Pasta indisponível no workspace atual.');
+    }
+}
+async function openFileFromWorkspace(root, relativePath) {
+    const clean = relativePath.replace(/^\/+/, '');
+    const parts = clean.split('/').filter(Boolean);
+    const target = vscode.Uri.joinPath(root.uri, ...parts);
+    try {
+        await vscode.workspace.fs.stat(target);
+        const doc = await vscode.workspace.openTextDocument(target);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+    catch {
+        vscode.window.showWarningMessage(`Arquivo não gerado ainda: ${relativePath}`);
+    }
+}
+async function openFilesToEdit(root, latestScreenId) {
+    const latestPath = '.tic-code/impact/latest-files-to-edit.md';
+    const fallbackPath = `.tic-code/impact/screens/${latestScreenId || ''}/files-to-edit.md`;
+    const latestUri = vscode.Uri.joinPath(root.uri, ...latestPath.split('/'));
+    try {
+        await vscode.workspace.fs.stat(latestUri);
+        await openFileFromWorkspace(root, latestPath);
+        return;
+    }
+    catch {
+        await openFileFromWorkspace(root, fallbackPath);
+    }
 }
 //# sourceMappingURL=overviewPanel.js.map

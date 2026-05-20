@@ -69,6 +69,58 @@
       {
         "command": "ticCoderLite.importVisorScreenshots",
         "title": "TIC Coder Lite: Importar Screenshots para Visor"
+      },
+      {
+        "command": "ticCoderLite.analyzeImpactByImage",
+        "title": "TIC Coder Lite: Analisar Impacto por Imagem/Tela"
+      },
+      {
+        "command": "ticCoderLite.importImpactScreenshot",
+        "title": "TIC Coder Lite: Importar Screenshot para Impacto"
+      },
+      {
+        "command": "ticCoderLite.estimateChangeCostWithLocalAi",
+        "title": "TIC Coder Lite: Estimar Esforço com IA Local"
+      },
+      {
+        "command": "ticCoderLite.exportChangePackageForPaidAi",
+        "title": "TIC Coder Lite: Exportar Pacote para IA Paga"
+      },
+      {
+        "command": "ticCoderLite.runChangeTwin",
+        "title": "TIC Coder Lite: Simular Mudança com Change Twin"
+      },
+      {
+        "command": "ticCoderLite.generateLegacyAntibodies",
+        "title": "TIC Coder Lite: Gerar Legacy Antibodies"
+      },
+      {
+        "command": "ticCoderLite.runChangeFirewallOnGitDiff",
+        "title": "TIC Coder Lite: Validar Diff Atual com AI Change Firewall"
+      },
+      {
+        "command": "ticCoderLite.analyzeWhatIf",
+        "title": "TIC Coder Lite: What-If – Analisar Impacto de Mudança Hipotética"
+      },
+      {
+        "command": "ticCoderLite.openChangeFirewallReport",
+        "title": "TIC Coder Lite: Abrir Relatório do AI Change Firewall"
+      },
+      {
+        "command": "ticCoderLite.openLegacyAntibodies",
+        "title": "TIC Coder Lite: Abrir Legacy Antibodies"
+      },
+      {
+        "command": "ticCoderLite.exportAiReviewPrompt",
+        "title": "TIC Coder Lite: Exportar Prompt de Revisão para IA"
+      },
+      {
+        "command": "ticCoderLite.generateChangeApprovalPack",
+        "title": "TIC Coder Lite: Gerar Pacote de Aprovação da Mudança"
+      },
+      {
+        "command": "ticCoderLite.openChangeApprovalPack",
+        "title": "TIC Coder Lite: Abrir Pacote de Aprovação"
       }
     ],
     "configuration": {
@@ -98,6 +150,16 @@
           "type": "string",
           "default": "qwen2.5-coder:7b",
           "description": "Modelo usado para tarefas complexas (PL/SQL, regras de negócio, domínio, state machines, permissões, arquivos críticos). Pode ser maior."
+        },
+        "ticCoderLite.localAi.visionEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativa reconhecimento opcional de screenshots com modelo local vision do Ollama quando a IA Local estiver ligada."
+        },
+        "ticCoderLite.localAi.visionModel": {
+          "type": "string",
+          "default": "llava:7b",
+          "description": "Modelo vision do Ollama usado para extrair texto e elementos de screenshots. Ex: llava:7b, llava:latest ou moondream:latest."
         },
         "ticCoderLite.localAi.mode": {
           "type": "string",
@@ -250,8 +312,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "tsc -p ./ --noEmit",
+    "verify:package": "node scripts/verify-package-files.js",
     "package": "vsce package --no-dependencies --allow-missing-repository",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile && npm run verify:package"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
