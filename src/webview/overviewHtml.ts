@@ -697,9 +697,12 @@ function renderProjectGraphSection(data?: OverviewHtmlInput['projectGraphData'])
     </div>
 
     <div id="mpg-tab-visual-graph" class="mpg-tab" style="display:none">
-      <p class="caption" style="margin-bottom:8px">Cada caixa é um projeto. As setas mostram pontes de API detectadas entre projetos.</p>
-      <div style="overflow-x:auto;background:var(--panel);border-radius:8px;padding:4px">
-        <svg id="mpgVisSvg" width="900" height="520" style="display:block;max-width:100%"></svg>
+      <p class="caption" style="margin-bottom:8px">Grupos por camada. Clique em uma seta para ver os detalhes da ponte.</p>
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="overflow-x:auto;background:var(--panel);border-radius:8px;padding:4px;flex:1;min-width:0">
+          <svg id="mpgVisSvg" width="900" height="200" style="display:block;max-width:100%;min-height:200px"></svg>
+        </div>
+        <div id="mpgDetail" style="display:none;width:220px;flex-shrink:0;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;line-height:1.6"></div>
       </div>
     </div>
 

@@ -2,10 +2,6 @@ import * as vscode from 'vscode';
 import type { ChangeSafetyReport, DiffImpactResult, GitDiffSummary, RequiredTestItem, TriggeredAntibody } from './changeFirewallTypes';
 import { evidenceRef, readJson, uniq } from './changeFirewallStore';
 
-export function buildRequiredTests(diff: GitDiffSummary, impact: DiffImpactResult, triggered: TriggeredAntibody[]): string[] {
-  return buildRequiredTestDetails(diff, impact, triggered).map((item) => item.name);
-}
-
 export function buildRequiredTestDetails(diff: GitDiffSummary, impact: DiffImpactResult, triggered: TriggeredAntibody[]): RequiredTestItem[] {
   const tests: string[] = [];
   const files = diff.changedFiles.join(' ').toLowerCase();
