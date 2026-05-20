@@ -591,7 +591,11 @@ export function getOverviewStyles(): string {
 export function getOverviewScript(nonce: string): string {
   return `<script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    const state = window.__TIC_CODE_DATA__;
+    const state = window.__TIC_CODE_DATA__ || {};
+    if (!state.graph) state.graph = { nodes: [], edges: [], stats: { totalNodes: 0, totalEdges: 0 } };
+    if (!Array.isArray(state.graph.nodes)) state.graph.nodes = [];
+    if (!Array.isArray(state.graph.edges)) state.graph.edges = [];
+    if (!state.graph.stats) state.graph.stats = { totalNodes: state.graph.nodes.length, totalEdges: state.graph.edges.length };
     const graphState = {
       selectedNodeId: state.graph.nodes[0]?.id || null,
       zoom: 1,
@@ -1079,7 +1083,8 @@ export function getOverviewScript(nonce: string): string {
       }
     });
 
-    $('graphTotal').textContent = state.graph.stats.totalNodes + ' nós totais · ' + state.graph.stats.totalEdges + ' arestas totais';
+    const graphTotalEl = $('graphTotal');
+    if (graphTotalEl) graphTotalEl.textContent = state.graph.stats.totalNodes + ' nós totais · ' + state.graph.stats.totalEdges + ' arestas totais';
 
     // Defer graph rendering until the advanced section is opened
     let graphInitialized = false;
@@ -1516,6 +1521,6 @@ export function getOverviewScript(nonce: string): string {
       return p ? p.replace(/\\/g, '/').split('/').pop() || p : '';
     }
 
-    renderMultiProjectGraph();
+    try { renderMultiProjectGraph(); } catch (err) { console.error('[TIC Coder Lite] renderMultiProjectGraph failed:', err); }
   </script>`;
 }
