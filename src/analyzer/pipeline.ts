@@ -9,6 +9,11 @@ import { buildDependencyGraph } from './buildDependencyGraph';
 import { generateQuickContext } from './generateQuickContext';
 import { generateModuleContext } from './generateModuleContext';
 import { generateMasterIndex } from './generateMasterIndex';
+import { detectBusinessRules } from './detectBusinessRules';
+import { detectPermissions } from './detectPermissions';
+import { generateMermaidDiagram } from './generateMermaidDiagram';
+import { generateGapsReport } from './generateGapsReport';
+import { generateOpenApi } from './generateOpenApi';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -47,7 +52,12 @@ const PHASES: PipelinePhase[] = [
   { id: 'modules', label: 'Detectando módulos', status: 'pending' },
   { id: 'context', label: 'Gerando quick-context.md', status: 'pending' },
   { id: 'module-context', label: 'Gerando contextos por módulo', status: 'pending' },
+  { id: 'business-rules', label: 'Extraindo regras de negócio', status: 'pending' },
+  { id: 'permissions', label: 'Mapeando permissões e roles', status: 'pending' },
   { id: 'index', label: 'Gerando index.md', status: 'pending' },
+  { id: 'diagram', label: 'Gerando diagrama Mermaid', status: 'pending' },
+  { id: 'openapi', label: 'Gerando openapi.yaml', status: 'pending' },
+  { id: 'gaps', label: 'Gerando relatório de gaps', status: 'pending' },
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
 
@@ -161,13 +171,51 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       fs.writeFileSync(path.join(moduleDir, 'context.md'), contextContent, 'utf8');
 
       modulesDone++;
-      const pct = 65 + Math.floor((modulesDone / modules.length) * 20);
+      const pct = 65 + Math.floor((modulesDone / modules.length) * 15);
       report('module-context', pct, `${mod.name} (${modulesDone}/${modules.length})`);
     }
 
     markDone('module-context');
 
-    // ── 9. INDEX ────────────────────────────────────────────────────────────────
+    // ── 9. REGRAS DE NEGÓCIO ────────────────────────────────────────────────────
+    report('business-rules', 80, 'Extraindo validações, enums, guards...');
+    const rules = detectBusinessRules(files);
+    // Salva business-rules.md por módulo
+    for (const mod of modules) {
+      const modRules = rules.filter((r) => mod.files.some((f) => f.relativePath === r.file));
+      if (modRules.length === 0) continue;
+      const moduleDir = path.join(modulesDir, mod.name);
+      const lines = [
+        `# Regras de Negócio — ${mod.name}`,
+        '',
+        '| Tipo | Marca | Descrição | Arquivo | Linha |',
+        '| --- | --- | --- | --- | --- |',
+        ...modRules.map((r) => `| ${r.type} | ${r.mark} | ${r.description.replace(/\|/g, '/')} | \`${r.file}\` | ${r.line} |`)
+      ];
+      fs.writeFileSync(path.join(moduleDir, 'business-rules.md'), lines.join('\n'), 'utf8');
+    }
+    markDone('business-rules');
+    report('business-rules', 100, `${rules.length} regras extraídas`);
+
+    // ── 10. PERMISSÕES ──────────────────────────────────────────────────────────
+    report('permissions', 82, 'Mapeando guards e roles...');
+    const permissions = detectPermissions(files, endpoints);
+    if (permissions.length > 0) {
+      const permLines = [
+        '# Matriz de Permissões — TIC Analyzer',
+        '',
+        '> 🟢 = extraído diretamente de anotação/decorator no código',
+        '',
+        '| Rota | Método | Roles | Arquivo | Linha |',
+        '| --- | --- | --- | --- | --- |',
+        ...permissions.map((p) => `| \`${p.route}\` | ${p.method} | ${p.roles.join(', ')} | \`${p.file}\` | ${p.line} |`)
+      ];
+      fs.writeFileSync(path.join(ticCodeDir, 'permissions.md'), permLines.join('\n'), 'utf8');
+    }
+    markDone('permissions');
+    report('permissions', 100, `${permissions.length} entradas de permissão mapeadas`);
+
+    // ── 11. INDEX ────────────────────────────────────────────────────────────────
     report('index', 85, 'Gerando index.md...');
     const indexContent = generateMasterIndex({
       projectName, totalFiles: files.length, totalLines, stack, modules, risks, generatedAt
@@ -175,8 +223,26 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     fs.writeFileSync(path.join(ticCodeDir, 'index.md'), indexContent, 'utf8');
     markDone('index');
 
-    // ── 10. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
-    report('ai-files', 90, 'Gerando copilot-instructions.md e CLAUDE.md...');
+    // ── 12. DIAGRAMA MERMAID ────────────────────────────────────────────────────
+    report('diagram', 88, 'Gerando diagrama de módulos...');
+    generateMermaidDiagram(ticCodeDir, modules, graph);
+    markDone('diagram');
+    report('diagram', 100, `diagram.md gerado`);
+
+    // ── 13. OPENAPI ─────────────────────────────────────────────────────────────
+    report('openapi', 91, 'Convertendo endpoints para OpenAPI...');
+    generateOpenApi(ticCodeDir, endpoints, stack);
+    markDone('openapi');
+    report('openapi', 100, `openapi.yaml com ${endpoints.length} endpoints`);
+
+    // ── 14. GAPS ────────────────────────────────────────────────────────────────
+    report('gaps', 94, 'Analisando lacunas...');
+    generateGapsReport(ticCodeDir, modules, endpoints, graph, rules, files.length);
+    markDone('gaps');
+    report('gaps', 100, `gaps.md gerado`);
+
+    // ── 15. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
+    report('ai-files', 97, 'Gerando copilot-instructions.md e CLAUDE.md...');
     writeCopilotInstructions(projectPath, projectName, files.length, modules);
     writeClaudeMd(projectPath, projectName, files.length, modules);
     markDone('ai-files');

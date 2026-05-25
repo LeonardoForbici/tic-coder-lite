@@ -216,10 +216,14 @@ export function App() {
               <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '14px' }}>Arquivos gerados</div>
               <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#aaa', lineHeight: '1.8' }}>
                 <div>📁 {result.outputPath}/</div>
-                <div>&nbsp;&nbsp;📄 quick-context.md &nbsp;<span style={{ color: '#56cfad' }}>← Copilot lê isso</span></div>
+                <div>&nbsp;&nbsp;📄 quick-context.md &nbsp;<span style={{ color: '#56cfad' }}>← Copilot lê isso (~{result.quickContextTokens.toLocaleString()} tokens)</span></div>
                 <div>&nbsp;&nbsp;📄 index.md &nbsp;<span style={{ color: '#888' }}>← Mapa de módulos</span></div>
-                <div>&nbsp;&nbsp;📁 modules/</div>
-                <div>&nbsp;&nbsp;&nbsp;&nbsp;📁 [módulo]/context.md &nbsp;<span style={{ color: '#888' }}>× {result.modulesGenerated}</span></div>
+                <div>&nbsp;&nbsp;📄 diagram.md &nbsp;<span style={{ color: '#888' }}>← Diagrama Mermaid</span></div>
+                <div>&nbsp;&nbsp;📄 openapi.yaml &nbsp;<span style={{ color: '#888' }}>← Endpoints OpenAPI 3.0</span></div>
+                <div>&nbsp;&nbsp;📄 gaps.md &nbsp;<span style={{ color: '#ff6b6b' }}>← Lacunas 🔴</span></div>
+                <div>&nbsp;&nbsp;📄 permissions.md &nbsp;<span style={{ color: '#888' }}>← Matriz roles × rotas</span></div>
+                <div>&nbsp;&nbsp;📁 modules/ &nbsp;<span style={{ color: '#888' }}>× {result.modulesGenerated}</span></div>
+                <div>&nbsp;&nbsp;&nbsp;&nbsp;📁 [módulo]/context.md &nbsp;<span style={{ color: '#888' }}>+ business-rules.md</span></div>
                 <div>📄 CLAUDE.md &nbsp;<span style={{ color: '#7c83fd' }}>← Claude Code lê isso</span></div>
                 <div>📄 .github/copilot-instructions.md</div>
               </div>

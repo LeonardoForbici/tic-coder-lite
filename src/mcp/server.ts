@@ -65,6 +65,37 @@ export class TicAnalyzerMcpServer {
             },
             required: ['query']
           }
+        },
+        {
+          name: 'get_diagram',
+          description: 'Retorna o diagrama Mermaid de módulos e dependências do projeto.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_openapi',
+          description: 'Retorna a especificação OpenAPI 3.0 dos endpoints detectados.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_gaps',
+          description: 'Retorna o relatório de gaps — lacunas 🔴 que não puderam ser inferidas estaticamente.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_permissions',
+          description: 'Retorna a matriz de permissões: rotas × roles detectados no código.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_business_rules',
+          description: 'Retorna as regras de negócio de um módulo específico (validações, enums, guards, constantes).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Nome do módulo (ex: "auth", "payment")' }
+            },
+            required: ['name']
+          }
         }
       ]
     }));
@@ -110,6 +141,28 @@ export class TicAnalyzerMcpServer {
           const contextPath = path.join(this.ticCodePath, 'modules', best.name, 'context.md');
           const content = fs.existsSync(contextPath) ? fs.readFileSync(contextPath, 'utf8') : `Contexto do módulo "${best.name}" não encontrado.`;
           return { content: [{ type: 'text', text: `# Módulo encontrado: ${best.name}\n\n${content}` }] };
+        }
+
+        case 'get_diagram': return { content: [{ type: 'text', text: this.readFile('diagram.md') }] };
+
+        case 'get_openapi': return { content: [{ type: 'text', text: this.readFile('openapi.yaml') }] };
+
+        case 'get_gaps': return { content: [{ type: 'text', text: this.readFile('gaps.md') }] };
+
+        case 'get_permissions': return { content: [{ type: 'text', text: this.readFile('permissions.md') }] };
+
+        case 'get_business_rules': {
+          const modName = (args as { name: string }).name;
+          const rulesPath = path.join(this.ticCodePath, 'modules', modName, 'business-rules.md');
+          if (!fs.existsSync(rulesPath)) {
+            const found = this.findModuleFuzzy(modName);
+            if (found) {
+              const foundRules = found.replace('context.md', 'business-rules.md');
+              if (fs.existsSync(foundRules)) return { content: [{ type: 'text', text: fs.readFileSync(foundRules, 'utf8') }] };
+            }
+            return { content: [{ type: 'text', text: `Nenhuma regra de negócio detectada para o módulo "${modName}".` }] };
+          }
+          return { content: [{ type: 'text', text: fs.readFileSync(rulesPath, 'utf8') }] };
         }
 
         default:
