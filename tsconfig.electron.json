@@ -6,6 +6,8 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "types": ["node"],
+    "ignoreDeprecations": "5.0",
     "outDir": "dist",
     "rootDir": ".",
     "baseUrl": ".",

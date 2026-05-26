@@ -2,8 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 import { execSync } from 'child_process';
-import { Server } from '@modelcontextprotocol/sdk/server';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema
@@ -39,7 +39,6 @@ function estimateTokens(text: string): number {
 }
 
 export class TicAnalyzerMcpServer {
-  private server: Server;
   private httpServer?: http.Server;
   private projectPath: string;
   private ticCodePath: string;
@@ -51,11 +50,15 @@ export class TicAnalyzerMcpServer {
     this.projectPath = options.projectPath;
     this.ticCodePath = path.join(options.projectPath, '.tic-code');
     this.onToolCall = options.onToolCall;
-    this.server = new Server(
+  }
+
+  private createServerInstance(): Server {
+    const server = new Server(
       { name: 'tic-analyzer', version: '2.0.0' },
       { capabilities: { tools: {} } }
     );
-    this.registerTools();
+    this.registerTools(server);
+    return server;
   }
 
   getTokenStats(): TokenStats {
@@ -83,8 +86,8 @@ export class TicAnalyzerMcpServer {
     this.sessionStart = Date.now();
   }
 
-  private registerTools(): void {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  private registerTools(server: Server): void {
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
           name: 'list_modules',
@@ -205,7 +208,7 @@ export class TicAnalyzerMcpServer {
       ]
     }));
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       const inputTokens = estimateTokens(JSON.stringify(args ?? {}));
 
@@ -497,10 +500,10 @@ export class TicAnalyzerMcpServer {
   }
 
   async startHttp(port = 7432): Promise<void> {
-    const app = http.createServer((req, res) => {
+    const app = http.createServer(async (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -508,8 +511,23 @@ export class TicAnalyzerMcpServer {
         return;
       }
       if (req.url === '/mcp' || req.url?.startsWith('/mcp')) {
-        const transport = new SSEServerTransport('/mcp', res);
-        this.server.connect(transport).catch(console.error);
+        try {
+          const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+          const serverInstance = this.createServerInstance();
+          await serverInstance.connect(transport);
+          let body: unknown;
+          if (req.method === 'POST') {
+            body = await new Promise((resolve, reject) => {
+              let data = '';
+              req.on('data', (chunk) => { data += chunk; });
+              req.on('end', () => { try { resolve(JSON.parse(data)); } catch (e) { reject(e); } });
+              req.on('error', reject);
+            });
+          }
+          await transport.handleRequest(req, res, body);
+        } catch (err) {
+          if (!res.headersSent) { res.writeHead(500); res.end(String(err)); }
+        }
         return;
       }
       res.writeHead(404);
