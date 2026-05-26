@@ -451,11 +451,12 @@ function Tag({ color = C.accent, children }: { color?: string; children: string 
 }
 
 function DocsTab() {
-  const [section, setSection] = useState<'inicio' | 'mcp' | 'abas' | 'ferramentas' | 'arquivos' | 'cli'>('inicio');
+  const [section, setSection] = useState<'inicio' | 'claude' | 'copilot' | 'abas' | 'ferramentas' | 'arquivos' | 'cli'>('inicio');
 
   const NAV = [
     { id: 'inicio',      label: 'Primeiros Passos' },
-    { id: 'mcp',         label: 'Configurar MCP' },
+    { id: 'claude',      label: 'Claude Code' },
+    { id: 'copilot',     label: 'VS Code / Copilot' },
     { id: 'abas',        label: 'Abas do App' },
     { id: 'ferramentas', label: 'Ferramentas MCP' },
     { id: 'arquivos',    label: 'Arquivos Gerados' },
@@ -500,14 +501,15 @@ function DocsTab() {
                 <span style={{ color: C.red }}>Não selecione a pasta <Tag>.tic-code</Tag> — sempre a pasta pai.</span>
               </Step>
               <Step n={2} title="Clique em Analisar">
-                O progresso aparece em tempo real com 23 fases. Para projetos grandes (10k–200k arquivos) o processo leva de 30 segundos a alguns minutos.
+                O progresso aparece em tempo real com 25 fases. Para projetos grandes (10k–200k arquivos) o processo leva de 30 segundos a alguns minutos. A partir da segunda análise, o cache incremental acelera significativamente os módulos não alterados.
               </Step>
               <Step n={3} title="Explore os resultados">
                 Após a análise, as abas <Tag>Impacto</Tag>, <Tag>Métricas</Tag>, <Tag>Multi-Grafo</Tag> e <Tag>Módulos</Tag> ficam disponíveis.
                 Uma pasta <Tag>.tic-code/</Tag> é criada dentro do projeto com todos os artefatos.
               </Step>
-              <Step n={4} title="(Opcional) Inicie o MCP Server">
-                Na aba <Tag>Visão Geral</Tag>, clique em <strong>Iniciar MCP</strong> para expor as 17 ferramentas de análise para o Claude Code via protocolo MCP.
+              <Step n={4} title="(Opcional) Configure a IA de sua escolha">
+                Para o <strong>Claude Code</strong>: ative o MCP Server e configure <Tag>.claude/settings.json</Tag> — veja a aba <em>Claude Code</em>.<br />
+                Para o <strong>GitHub Copilot</strong>: o <Tag>copilot-instructions.md</Tag> já foi gerado. Para as 19 ferramentas, veja a aba <em>VS Code / Copilot</em>.
               </Step>
             </Section>
 
@@ -522,32 +524,36 @@ function DocsTab() {
           </div>
         )}
 
-        {/* ── Configurar MCP ── */}
-        {section === 'mcp' && (
+        {/* ── Claude Code ── */}
+        {section === 'claude' && (
           <div>
-            <Section title="O que é o MCP Server?">
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 12px 0' }}>
-                MCP (Model Context Protocol) é o protocolo que permite ao Claude Code chamar ferramentas externas.
-                O TIC Analyzer expõe 17 ferramentas via MCP para que o Claude possa consultar a análise do projeto
-                de forma eficiente — pedindo apenas o que precisa, sem carregar tudo no contexto.
+            <Section title="Como funciona com o Claude Code">
+              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 8px 0' }}>
+                O Claude Code usa MCP (Model Context Protocol) para chamar as ferramentas do TIC Analyzer sob demanda —
+                sem você precisar pedir. Ele lê o <Tag>CLAUDE.md</Tag> gerado pela análise, entende que há um servidor MCP
+                disponível, e já consulta <Tag>get_quick_context()</Tag> sozinho antes de responder qualquer pergunta sobre o projeto.
+              </p>
+              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: 0 }}>
+                Cada ferramenta retorna apenas o necessário: <Tag>get_impact()</Tag> custa ~200 tokens, <Tag>get_metrics()</Tag> ~500 tokens.
+                O Claude nunca carrega o projeto inteiro — apenas o que precisa, quando precisa.
               </p>
             </Section>
 
-            <Section title="Passo a passo para configurar">
-              <Step n={1} title="Analise o projeto e inicie o MCP Server">
-                Na aba <Tag>Visão Geral</Tag>, após a análise, clique em <strong>Iniciar MCP</strong>. O servidor sobe em <Tag>localhost:7432</Tag>.
+            <Section title="Configuração passo a passo">
+              <Step n={1} title="Rode a análise">
+                Clique em <strong>Analisar</strong>. Quando terminar, o arquivo <Tag>CLAUDE.md</Tag> é gerado automaticamente na raiz do projeto com as instruções de navegação para o Claude.
               </Step>
-              <Step n={2} title="Crie o arquivo de configuração no projeto analisado">
-                Dentro da pasta raiz do projeto que você analisou, crie a pasta <Tag>.claude/</Tag> (se não existir) e o arquivo <Tag>settings.json</Tag>:
+              <Step n={2} title="Inicie o MCP Server">
+                Na aba <Tag>Visão Geral</Tag>, clique em <strong>Iniciar MCP</strong>. O servidor sobe em <Tag>localhost:7432</Tag> e fica ativo enquanto o app estiver aberto.
+              </Step>
+              <Step n={3} title="Crie .claude/settings.json no projeto analisado">
+                Dentro da pasta raiz do projeto (a mesma que você analisou), crie:
                 <Code>{`# Linux / macOS
 mkdir -p /seu/projeto/.claude
-nano /seu/projeto/.claude/settings.json
 
-# Windows
-mkdir C:\\seu\\projeto\\.claude
-notepad C:\\seu\\projeto\\.claude\\settings.json`}</Code>
-              </Step>
-              <Step n={3} title="Cole a configuração abaixo no settings.json">
+# Windows PowerShell
+New-Item -ItemType Directory -Force -Path C:\seu\projeto\.claude`}</Code>
+                Conteúdo do arquivo <Tag>.claude/settings.json</Tag>:
                 <Code>{`{
   "mcpServers": {
     "tic-analyzer": {
@@ -556,28 +562,184 @@ notepad C:\\seu\\projeto\\.claude\\settings.json`}</Code>
   }
 }`}</Code>
               </Step>
-              <Step n={4} title="Abra o projeto no Claude Code">
-                Com o Claude Code aberto na pasta do projeto, o MCP já estará disponível. Você pode testar digitando:
-                <Code>{`# No Claude Code, use diretamente:
+              <Step n={4} title="Abra o projeto no Claude Code e teste">
+                No terminal, dentro do projeto:
+                <Code>{`claude
+
+# Verifique se o MCP está conectado:
 /mcp
-# Deve aparecer "tic-analyzer" na lista de servidores`}</Code>
+# → Deve mostrar: tic-analyzer  connected  19 tools`}</Code>
               </Step>
-              <Step n={5} title="Fluxo recomendado de uso">
-                Diga ao Claude para começar pela visão geral antes de qualquer tarefa:
-                <Code>{`"Leia o get_quick_context() para entender o projeto e
-depois me ajude a implementar X"`}</Code>
-                O Claude vai chamar <Tag>get_quick_context()</Tag> automaticamente e trabalhar com contexto real do seu projeto.
+              <Step n={5} title="Use normalmente — o Claude sabe o que fazer">
+                Basta conversar. O Claude vai consultar as ferramentas automaticamente:
+                <Code>{`"Quero refatorar o módulo de pagamentos. Por onde começo?"
+→ Claude chama: get_quick_context() + get_module("pagamentos")
+   + get_metrics("pagamentos") + get_hotspots()
+
+"Quais arquivos vou afetar se renomear UserService?"
+→ Claude chama: get_impact("src/services/user.service.ts")
+
+"Como está a dívida técnica do projeto?"
+→ Claude chama: get_hotspots() + get_violations()`}</Code>
               </Step>
             </Section>
 
-            <Section title="Mantendo o MCP sempre ativo">
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 8px 0' }}>
-                O servidor fica ativo enquanto o TIC Analyzer estiver aberto. Se você fechar e reabrir o app, clique em <strong>Iniciar MCP</strong> novamente.
-              </p>
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: 0 }}>
-                A análise não precisa rodar novamente — os arquivos <Tag>.tic-code/</Tag> já estão no projeto e o MCP Server apenas os lê.
-                Você só precisa re-analisar quando o projeto mudar significativamente.
-              </p>
+            <Section title="Dicas de uso">
+              {[
+                { tip: 'Não peça para carregar tudo', desc: 'Nunca diga "leia todos os arquivos do projeto". O Claude vai consultar o MCP de forma cirúrgica — deixe ele decidir o que buscar.' },
+                { tip: 'Antes de commitar, use get_diff_impact', desc: 'Diga: "antes de fazer o commit, analise o impacto das mudanças atuais". O Claude chama get_diff_impact() automaticamente.' },
+                { tip: 'Re-analise quando o projeto mudar', desc: 'O .tic-code/ é um snapshot. Após adicionar muitos arquivos ou fazer uma refatoração grande, rode a análise novamente. O cache incremental faz isso em segundos para módulos não alterados.' },
+                { tip: 'O MCP Server precisa estar aberto', desc: 'O servidor só funciona enquanto o TIC Analyzer estiver rodando. Se fechar o app, reinicie o MCP Server antes de abrir o Claude Code.' },
+              ].map((item) => (
+                <div key={item.tip} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
+                  <div style={{ color: C.accent, fontSize: '14px', flexShrink: 0, marginTop: '1px' }}>→</div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '3px' }}>{item.tip}</div>
+                    <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.6 }}>{item.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </Section>
+          </div>
+        )}
+
+        {/* ── VS Code / Copilot ── */}
+        {section === 'copilot' && (
+          <div>
+            <Section title="Dois modos de integração com o Copilot">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
+                <div style={{ padding: '14px', background: '#0d1b2a', borderRadius: '10px', border: `1px solid ${C.green}44` }}>
+                  <div style={{ fontWeight: 700, color: C.green, marginBottom: '6px', fontSize: '13px' }}>Modo Básico</div>
+                  <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.8 }}>
+                    Qualquer versão do VS Code.<br />
+                    Funciona imediatamente após a análise.<br />
+                    O Copilot lê <Tag color={C.green}>copilot-instructions.md</Tag> automaticamente.<br />
+                    Você referencia arquivos com <Tag color={C.green}>#file:</Tag>
+                  </div>
+                </div>
+                <div style={{ padding: '14px', background: '#0d1b2a', borderRadius: '10px', border: `1px solid ${C.accent}44` }}>
+                  <div style={{ fontWeight: 700, color: C.accent, marginBottom: '6px', fontSize: '13px' }}>Modo MCP (VS Code 1.99+)</div>
+                  <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.8 }}>
+                    Acesso às 19 ferramentas do TIC Analyzer.<br />
+                    Requer configurar <Tag>.vscode/mcp.json</Tag>.<br />
+                    Ferramentas ativadas manualmente no Copilot Chat.<br />
+                    Monitor de tokens em tempo real.
+                  </div>
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Modo Básico — zero configuração">
+              <Step n={1} title="Rode a análise">
+                Clique em <strong>Analisar</strong>. O arquivo <Tag>.github/copilot-instructions.md</Tag> é gerado automaticamente com o mapa do projeto: stack, módulos, onde estão os contextos, como navegar o <Tag>.tic-code/</Tag>.
+              </Step>
+              <Step n={2} title="Abra o projeto no VS Code — pronto">
+                O Copilot lê o <Tag>copilot-instructions.md</Tag> automaticamente em toda conversa no Copilot Chat. Sem nenhuma configuração extra, ele já sabe a estrutura do projeto.
+              </Step>
+              <Step n={3} title="Referencie arquivos específicos quando precisar de profundidade">
+                No Copilot Chat, use <Tag>#file:</Tag> para carregar contextos específicos:
+                <Code>{`# Contexto geral do projeto (recomendado para começar)
+#file:.tic-code/quick-context.md me ajude a implementar X
+
+# Contexto completo de um módulo específico
+#file:.tic-code/modules/pagamentos/context.md
+refatore o service de pagamentos
+
+# Ver métricas antes de refatorar
+#file:.tic-code/metrics-summary.md
+quais arquivos têm maior dívida técnica?
+
+# Schema do banco para queries/migrations
+#file:.tic-code/db-schema-summary.md
+crie uma migration para adicionar coluna X
+
+# Impacto de uma mudança (leitura manual)
+#file:.tic-code/impact-index.json
+qual é o impacto de mudar UserRepository?`}</Code>
+              </Step>
+            </Section>
+
+            <Section title="Modo MCP — VS Code 1.99+">
+              <Step n={1} title="Verifique a versão do VS Code">
+                Menu <strong>Help → About</strong>. Precisa ser <strong>1.99.0 ou superior</strong>.
+                <Code>{`# Ou verifique pelo terminal:
+code --version
+# → 1.99.x ou maior`}</Code>
+              </Step>
+              <Step n={2} title="Inicie o MCP Server no TIC Analyzer">
+                Na aba <Tag>Visão Geral</Tag>, após a análise, clique em <strong>Iniciar MCP</strong>. Mantenha o TIC Analyzer aberto.
+              </Step>
+              <Step n={3} title="Crie .vscode/mcp.json no projeto analisado">
+                Dentro da pasta raiz do projeto:
+                <Code>{`# Linux / macOS
+mkdir -p /seu/projeto/.vscode
+
+# Windows PowerShell
+New-Item -ItemType Directory -Force -Path C:\seu\projeto\.vscode`}</Code>
+                Conteúdo do arquivo <Tag>.vscode/mcp.json</Tag>:
+                <Code>{`{
+  "servers": {
+    "tic-analyzer": {
+      "type": "sse",
+      "url": "http://localhost:7432/mcp"
+    }
+  }
+}`}</Code>
+              </Step>
+              <Step n={4} title="Ative MCP nas configurações do VS Code">
+                Abra as configurações (<Tag>Ctrl+,</Tag> / <Tag>Cmd+,</Tag>), busque por <strong>copilot mcp</strong> e ative a opção <em>Github Copilot Chat: Mcp Enabled</em>. Ou adicione ao seu <Tag>settings.json</Tag>:
+                <Code>{`{
+  "github.copilot.chat.mcp.enabled": true
+}`}</Code>
+              </Step>
+              <Step n={5} title="Use o modo Agent no Copilot Chat">
+                Abra o Copilot Chat (<Tag>Ctrl+Shift+I</Tag>), mude para o modo <strong>Agent</strong> (ícone de ferramenta). Depois peça as ferramentas explicitamente:
+                <Code>{`Use tic-analyzer to get the quick context of this project
+
+Use tic-analyzer get_impact to check src/services/user.service.ts
+
+Use tic-analyzer get_metrics for the payments module
+
+Use tic-analyzer get_diff_impact to review my current changes`}</Code>
+                <div style={{ marginTop: '8px', padding: '10px', background: '#1a1500', borderRadius: '8px', border: '1px solid #7a600044' }}>
+                  <span style={{ fontSize: '11px', color: '#f0c000' }}>Diferença do Claude Code: o Copilot não chama ferramentas automaticamente. Você precisa pedir explicitamente usando "Use tic-analyzer" no início da mensagem.</span>
+                </div>
+              </Step>
+            </Section>
+
+            <Section title="Comparação rápida">
+              <div style={{ overflowX: 'auto' as const }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: `2px solid ${C.border}` }}>
+                      <th style={{ textAlign: 'left' as const, padding: '8px 10px', color: C.muted, fontWeight: 600 }}>Capacidade</th>
+                      <th style={{ textAlign: 'center' as const, padding: '8px 10px', color: C.green, fontWeight: 600 }}>Copilot<br/>Básico</th>
+                      <th style={{ textAlign: 'center' as const, padding: '8px 10px', color: C.accent, fontWeight: 600 }}>Copilot<br/>+ MCP</th>
+                      <th style={{ textAlign: 'center' as const, padding: '8px 10px', color: '#a0a0ff', fontWeight: 600 }}>Claude<br/>Code</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      ['copilot-instructions.md automático', '✓', '✓', '—'],
+                      ['CLAUDE.md automático', '—', '—', '✓'],
+                      ['Contexto via #file: (manual)', '✓', '✓', '✓'],
+                      ['19 ferramentas MCP disponíveis', '—', '✓', '✓'],
+                      ['Ferramentas ativadas automaticamente', '—', '—', '✓'],
+                      ['get_impact() ~200 tokens', '—', '✓ (manual)', '✓ (auto)'],
+                      ['get_diff_impact() antes do commit', '—', '✓ (manual)', '✓ (auto)'],
+                      ['Monitor de tokens em tempo real', '—', '✓', '✓'],
+                      ['Funciona sem instalar nada extra', '✓', '—', '—'],
+                    ].map(([cap, basic, mcp, claude]) => (
+                      <tr key={cap} style={{ borderBottom: `1px solid ${C.border}` }}>
+                        <td style={{ padding: '7px 10px', color: '#b0b0c0' }}>{cap}</td>
+                        <td style={{ textAlign: 'center' as const, padding: '7px 10px', color: basic === '✓' ? C.green : basic === '—' ? '#444' : C.muted }}>{basic}</td>
+                        <td style={{ textAlign: 'center' as const, padding: '7px 10px', color: mcp === '✓' || mcp.includes('manual') ? C.accent : '#444' }}>{mcp}</td>
+                        <td style={{ textAlign: 'center' as const, padding: '7px 10px', color: claude === '✓' || claude.includes('auto') ? '#a0a0ff' : '#444' }}>{claude}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Section>
           </div>
         )}
@@ -630,7 +792,7 @@ depois me ajude a implementar X"`}</Code>
         {section === 'ferramentas' && (
           <div>
             <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 16px 0' }}>
-              Com o MCP Server ativo, o Claude Code pode chamar estas 17 ferramentas. Cada uma retorna apenas o necessário — de ~200 a ~75k tokens dependendo do escopo.
+              Com o MCP Server ativo, o Claude Code (e o Copilot em modo Agent) pode chamar estas 19 ferramentas. Cada uma retorna apenas o necessário — de ~200 a ~75k tokens dependendo do escopo.
             </p>
             {[
               { tool: 'get_quick_context()', tokens: '~12k', desc: 'Visão geral compacta do projeto: stack, módulos, riscos, top endpoints. Use como ponto de partida em qualquer conversa.' },
