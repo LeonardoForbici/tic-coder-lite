@@ -25,6 +25,9 @@ import { detectLayerViolations } from './detectLayerViolations';
 import { generateMetricsReport } from './generateMetricsReport';
 import { detectInheritance, formatInheritanceReport } from './detectInheritance';
 import { detectPatterns, formatPatternsReport } from './detectPatterns';
+import { detectDbSchema, formatDbSchemaReport, formatDbSchemaSummary } from './detectDbSchema';
+import { exportAnalysis } from './exportAnalysis';
+import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -57,6 +60,8 @@ export interface PipelineResult {
   patterns: number;
   impactedFiles: number;
   inheritanceClasses: number;
+  dbTables: number;
+  cacheHits: number;
   error?: string;
 }
 
@@ -85,6 +90,8 @@ const PHASES: PipelinePhase[] = [
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
+  { id: 'db-schema', label: 'Detectando schema de banco de dados', status: 'pending' },
+  { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
 
@@ -94,7 +101,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     return {
       success: false, outputPath: '', totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
-      hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0,
+      hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
       error: `Pasta inválida: "${projectPath}"\n\nSelecione a pasta RAIZ do projeto, não a pasta .tic-code.\nExemplo correto: C:\\Git\\meu-projeto`
     };
   }
@@ -121,6 +128,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     fs.mkdirSync(ticCodeDir, { recursive: true });
     fs.mkdirSync(modulesDir, { recursive: true });
 
+    // ── CACHE ─────────────────────────────────────────────────────────────────────
+    const previousCache = loadFileCache(ticCodeDir);
+
     // ── 1. SCAN ──────────────────────────────────────────────────────────────────
     report('scan', 5, 'Iniciando scan...');
     const files = scanFiles(projectPath, {
@@ -129,8 +139,10 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       }
     });
     const totalLines = files.reduce((sum, f) => sum + f.lines, 0);
+    const changedFiles = computeChangedFiles(files, previousCache);
+    const isIncremental = previousCache !== null && changedFiles.size < files.length;
     markDone('scan');
-    report('scan', 100, `${files.length.toLocaleString()} arquivos, ${totalLines.toLocaleString()} linhas`);
+    report('scan', 100, `${files.length.toLocaleString()} arquivos${isIncremental ? ` (${changedFiles.size} alterados)` : ''}, ${totalLines.toLocaleString()} linhas`);
 
     // ── 2. STACK ─────────────────────────────────────────────────────────────────
     report('stack', 10, 'Detectando linguagens e frameworks...');
@@ -199,11 +211,21 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     // ── 8. MÓDULOS CONTEXTO ──────────────────────────────────────────────────────
     report('module-context', 50, `Gerando contextos para ${modules.length} módulos...`);
     let modulesDone = 0;
+    let moduleCacheHits = 0;
     for (const mod of modules) {
       const moduleDir = path.join(modulesDir, mod.name);
+      const contextPath = path.join(moduleDir, 'context.md');
+      const hasChange = mod.files.some((f) => changedFiles.has(f.relativePath));
+      if (!hasChange && fs.existsSync(contextPath)) {
+        moduleCacheHits++;
+        modulesDone++;
+        const pct = 50 + Math.floor((modulesDone / modules.length) * 8);
+        report('module-context', pct, `${mod.name} ✓ cache (${modulesDone}/${modules.length})`);
+        continue;
+      }
       fs.mkdirSync(moduleDir, { recursive: true });
       const contextContent = generateModuleContext({ module: mod, risks, endpoints, graph, projectName });
-      fs.writeFileSync(path.join(moduleDir, 'context.md'), contextContent, 'utf8');
+      fs.writeFileSync(contextPath, contextContent, 'utf8');
       modulesDone++;
       const pct = 50 + Math.floor((modulesDone / modules.length) * 8);
       report('module-context', pct, `${mod.name} (${modulesDone}/${modules.length})`);
@@ -321,7 +343,31 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('patterns');
     report('patterns', 100, `${patternMatches.length} padrões detectados`);
 
-    // ── 20. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
+    // ── 20. SCHEMA DE BANCO ───────────────────────────────────────────────────────
+    report('db-schema', 90, 'Detectando tabelas, models, migrations...');
+    const dbSchema = detectDbSchema(files);
+    if (dbSchema.totalTables > 0) {
+      fs.writeFileSync(path.join(ticCodeDir, 'db-schema.md'), formatDbSchemaReport(dbSchema), 'utf8');
+      fs.writeFileSync(path.join(ticCodeDir, 'db-schema.json'), JSON.stringify(dbSchema), 'utf8');
+      fs.writeFileSync(path.join(ticCodeDir, 'db-schema-summary.md'), formatDbSchemaSummary(dbSchema), 'utf8');
+    }
+    markDone('db-schema');
+    report('db-schema', 100, `${dbSchema.totalTables} tabelas/models detectadas (${dbSchema.detectedVia.join(', ') || 'nenhuma'})`);
+
+    // ── 21. EXPORT JSON ───────────────────────────────────────────────────────────
+    report('export-json', 92, 'Exportando analysis.json estruturado...');
+    exportAnalysis(ticCodeDir, {
+      projectName, projectPath, files, totalLines, stack, modules, endpoints, graph, risks,
+      metrics, fileMetrics: metrics.files, violations, patternMatches, inheritanceTree,
+      dbSchema, impactIndex, quickContextTokens
+    });
+    markDone('export-json');
+    report('export-json', 100, 'analysis.json exportado');
+
+    // ── SALVA CACHE ───────────────────────────────────────────────────────────────
+    saveFileCache(ticCodeDir, files);
+
+    // ── 22. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
     report('ai-files', 94, 'Gerando copilot-instructions.md e CLAUDE.md...');
     writeCopilotInstructions(projectPath, projectName, files.length, modules);
     writeClaudeMd(projectPath, projectName, files.length, modules);
@@ -342,7 +388,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       violations: violations.length,
       patterns: patternMatches.length,
       impactedFiles,
-      inheritanceClasses: inheritanceTree.classes.length
+      inheritanceClasses: inheritanceTree.classes.length,
+      dbTables: dbSchema.totalTables,
+      cacheHits: moduleCacheHits
     };
 
   } catch (err) {
@@ -350,7 +398,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     return {
       success: false, outputPath: ticCodeDir, totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
-      hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, error
+      hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0, error
     };
   }
 }

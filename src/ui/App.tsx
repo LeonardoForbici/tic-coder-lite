@@ -29,6 +29,7 @@ interface AnalysisResult {
   plsqlObjects: number; frontendCalls: number; dbCalls: number;
   hotspots: number; violations: number; patterns: number;
   impactedFiles: number; inheritanceClasses: number;
+  dbTables: number; cacheHits: number;
   error?: string;
 }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
@@ -546,6 +547,8 @@ depois me ajude a implementar X"`}</Code>
               { tool: 'get_openapi()', tokens: '~2k', desc: 'Especificação OpenAPI 3.0 com todos os endpoints detectados (Spring, NestJS, Express, FastAPI).' },
               { tool: 'get_business_rules("módulo")', tokens: '~500', desc: 'Validações, enums, guards e constantes de negócio de um módulo (@NotNull, .required(), enum Status, etc).' },
               { tool: 'get_permissions()', tokens: '~1k', desc: 'Matriz de permissões: rota × método × roles (@PreAuthorize, @Roles, @Secured, requireRole, etc).' },
+              { tool: 'get_db_schema("tabela")', tokens: '~200–500', desc: 'Schema de banco detectado: tabelas de SQL migrations, Prisma, TypeORM, JPA/Hibernate, Django, Sequelize. Sem parâmetro retorna resumo; com nome de tabela retorna colunas detalhadas.' },
+              { tool: 'get_analysis_json()', tokens: '~500', desc: 'Metadados estruturados da análise em JSON compacto. Útil para scripts, CI/CD e ferramentas externas que não usam MCP.' },
               { tool: 'get_gaps()', tokens: '~1k', desc: 'Relatório de lacunas: módulos sem endpoints, arquivos isolados, dependências não analisadas.' },
             ].map((t) => (
               <div key={t.tool} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
@@ -583,6 +586,10 @@ depois me ajude a implementar X"`}</Code>
               { file: 'modules/{nome}/business-rules.md', tokens: '~500', desc: 'Validações, enums, guards e constantes extraídos dos arquivos do módulo.' },
               { file: 'modules/{nome}/metrics.md', tokens: '~300', desc: 'Complexidade ciclomática, debt score e hotspots específicos do módulo.' },
               { file: 'modules/{nome}/patterns.md', tokens: '~300', desc: 'Padrões arquiteturais detectados nos arquivos do módulo.' },
+              { file: 'db-schema.md', tokens: '~2k', desc: 'Schema de banco completo: tabelas, colunas, tipos, PKs e FKs detectados de migrations SQL, Prisma, TypeORM, JPA, Django ou Sequelize.' },
+              { file: 'db-schema-summary.md', tokens: '~200', desc: 'Resumo compacto do schema: só nome das tabelas e contagem de colunas. Usado pelo MCP get_db_schema() sem parâmetro.' },
+              { file: 'analysis.json', tokens: 'JSON', desc: 'Exportação estruturada de toda a análise: stack, módulos, endpoints, métricas, violações, padrões, schema de banco. Para integração com CI/CD e ferramentas externas.' },
+              { file: 'file-cache.json', tokens: 'JSON', desc: 'Cache de mtimes para análise incremental. Na próxima análise, módulos sem mudanças são reutilizados do cache e não são re-processados.' },
             ].map((f) => (
               <div key={f.file} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
                 <div style={{ minWidth: '260px', flexShrink: 0 }}>
@@ -816,7 +823,9 @@ export function App() {
                       { num: result.violations.toString(), label: 'Violacoes Arq.', color: result.violations > 0 ? C.red : C.green },
                       { num: result.patterns.toString(), label: 'Padroes', color: C.accent },
                       { num: result.impactedFiles.toString(), label: 'Impacto Mapeado', color: C.accent },
+                      ...(result.dbTables > 0 ? [{ num: result.dbTables.toString(), label: 'Tabelas BD', color: '#f0c000' }] : []),
                       ...(result.inheritanceClasses > 0 ? [{ num: result.inheritanceClasses.toString(), label: 'Heranca', color: '#a0a0ff' }] : []),
+                      ...(result.cacheHits > 0 ? [{ num: result.cacheHits.toString(), label: 'Cache Hits', color: C.green }] : []),
                       ...(result.plsqlObjects > 0 ? [{ num: result.plsqlObjects.toString(), label: 'PL/SQL', color: '#f0c000' }] : []),
                       ...(result.frontendCalls > 0 ? [{ num: result.frontendCalls.toString(), label: 'HTTP calls', color: C.accent }] : []),
                       ...(result.dbCalls > 0 ? [{ num: result.dbCalls.toString(), label: 'Backend->BD', color: '#f0c000' }] : []),
@@ -830,7 +839,7 @@ export function App() {
                 </div>
 
                 <div style={S.card}>
-                  <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '13px', color: C.muted }}>MCP SERVER — 16 FERRAMENTAS</div>
+                  <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '13px', color: C.muted }}>MCP SERVER — 19 FERRAMENTAS</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={S.dot(mcpRunning)} />
                     <span style={{ fontSize: '13px', color: mcpRunning ? C.green : C.muted, flex: 1 }}>
@@ -845,7 +854,7 @@ export function App() {
                         {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
                       </div>
                       <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules'].map((tool) => (
+                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_diff_impact','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
                       </div>
@@ -908,6 +917,9 @@ export function App() {
                     { path: 'openapi.yaml', note: 'endpoints OpenAPI 3.0', color: C.muted, indent: 1 },
                     { path: 'gaps.md + permissions.md + index.md', note: '', color: C.muted, indent: 1 },
                     { path: `modules/ x${result.modulesGenerated}`, note: 'context + business-rules + metrics + patterns', color: C.muted, indent: 1 },
+                    ...(result.dbTables > 0 ? [{ path: `db-schema.md + db-schema-summary.md`, note: `${result.dbTables} tabelas detectadas`, color: '#f0c000', indent: 1 }] : []),
+                    { path: 'analysis.json', note: 'export estruturado completo', color: '#7c83fd', indent: 1 },
+                    { path: 'file-cache.json', note: `cache incremental${result.cacheHits > 0 ? ` (${result.cacheHits} módulos reutilizados)` : ''}`, color: C.green, indent: 1 },
                     { path: 'CLAUDE.md + .github/copilot-instructions.md', note: '', color: '#7c83fd', indent: 0 },
                   ].map((row, i) => (
                     <div key={i} style={{ paddingLeft: `${row.indent * 16}px` }}>

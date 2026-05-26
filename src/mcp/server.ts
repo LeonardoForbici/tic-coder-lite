@@ -134,6 +134,21 @@ export class TicAnalyzerMcpServer {
           name: 'get_diff_impact',
           description: 'Lê o git diff do projeto (HEAD + staged + untracked) e retorna o impacto consolidado de TODAS as mudanças pendentes. Use antes de fazer commit para saber o que será afetado.',
           inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_db_schema',
+          description: 'Retorna o schema de banco de dados detectado: tabelas/models de SQL migrations, Prisma, TypeORM, JPA, Django, Sequelize. Use table para filtrar uma tabela específica (~200 tokens). Sem parâmetro retorna resumo de todas as tabelas (~500 tokens).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              table: { type: 'string', description: 'Nome da tabela/model para filtrar (opcional).' }
+            }
+          }
+        },
+        {
+          name: 'get_analysis_json',
+          description: 'Retorna metadados estruturados da análise (contagens, top hotspots, violations, patterns) em JSON compacto. Útil para ferramentas externas. ~500 tokens.',
+          inputSchema: { type: 'object', properties: {} }
         }
       ]
     }));
@@ -330,6 +345,48 @@ export class TicAnalyzerMcpServer {
           lines.push(`- Arquivos transitivamente afetados: **${transitiveAll.size}**`);
 
           return { content: [{ type: 'text', text: lines.join('\n') }] };
+        }
+
+        case 'get_db_schema': {
+          const tableArg = (args as { table?: string }).table;
+          const summaryPath = path.join(this.ticCodePath, 'db-schema-summary.md');
+          const fullPath = path.join(this.ticCodePath, 'db-schema.md');
+          if (!fs.existsSync(summaryPath)) {
+            return { content: [{ type: 'text', text: 'Schema de banco não detectado. Verifique se o projeto possui migrations SQL, schema.prisma, TypeORM entities, JPA entities, ou Django models.' }] };
+          }
+          if (!tableArg) {
+            return { content: [{ type: 'text', text: fs.readFileSync(summaryPath, 'utf8') }] };
+          }
+          // Return single table section from full report
+          const full = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf8') : '';
+          const sectionRe = new RegExp(`## \`?${tableArg}\`?[\\s\\S]*?(?=\\n## |\n*$)`, 'i');
+          const section = full.match(sectionRe)?.[0];
+          if (!section) {
+            const jsonPath = path.join(this.ticCodePath, 'db-schema.json');
+            if (fs.existsSync(jsonPath)) {
+              const schema = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+              const found = schema.tables?.find((t: { name: string }) => t.name.toLowerCase().includes(tableArg.toLowerCase()));
+              if (found) return { content: [{ type: 'text', text: `# Tabela: ${found.name}\nFonte: ${found.sourceFile} (${found.sourceType})\nColunas: ${found.columns.map((c: { name: string; type: string }) => c.name).join(', ')}` }] };
+            }
+            return { content: [{ type: 'text', text: `Tabela "${tableArg}" não encontrada. Use get_db_schema() para ver todas.` }] };
+          }
+          return { content: [{ type: 'text', text: section.trim() }] };
+        }
+
+        case 'get_analysis_json': {
+          const analysisPath = path.join(this.ticCodePath, 'analysis.json');
+          if (!fs.existsSync(analysisPath)) {
+            return { content: [{ type: 'text', text: 'analysis.json não encontrado. Execute a análise novamente.' }] };
+          }
+          const analysis = JSON.parse(fs.readFileSync(analysisPath, 'utf8'));
+          // Return compact summary without verbose arrays
+          const compact = {
+            ...analysis,
+            modules: analysis.modules?.length,
+            endpoints: analysis.endpoints?.length,
+            impact: { indexedFiles: analysis.impact?.indexedFiles, topImpact: analysis.impact?.topImpact?.slice(0, 5) }
+          };
+          return { content: [{ type: 'text', text: JSON.stringify(compact, null, 2) }] };
         }
 
         case 'get_violations': {
