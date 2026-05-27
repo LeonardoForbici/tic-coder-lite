@@ -15,8 +15,8 @@ import { generateMermaidDiagram } from './generateMermaidDiagram';
 import { generateGapsReport } from './generateGapsReport';
 import { generateOpenApi } from './generateOpenApi';
 import { detectFrontendCalls } from './detectFrontendCalls';
-import { detectPlsqlObjects } from './detectPlsqlObjects';
-import { detectBackendDbCalls } from './detectBackendDbCalls';
+import { detectPlsqlObjects, type PlsqlObject, type PlsqlCall } from './detectPlsqlObjects';
+import { detectBackendDbCalls, type DbCall } from './detectBackendDbCalls';
 import { buildCallGraph } from './buildCallGraph';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
@@ -179,6 +179,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     // ── 5c. PL/SQL ───────────────────────────────────────────────────────────────
     report('plsql', 38, 'Extraindo procedures, functions e packages PL/SQL...');
     const { objects: plsqlObjects, calls: plsqlCalls } = detectPlsqlObjects(files);
+    fs.writeFileSync(path.join(ticCodeDir, 'plsql-objects.json'), JSON.stringify(plsqlObjects), 'utf8');
     markDone('plsql');
     report('plsql', 100, `${plsqlObjects.length} objetos PL/SQL, ${plsqlCalls.length} chamadas`);
 
@@ -296,6 +297,11 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     generateMultiGraph(ticCodeDir, callGraph);
     // Salva JSON do call-graph para o visualizador interativo
     fs.writeFileSync(path.join(ticCodeDir, 'call-graph.json'), JSON.stringify(callGraph), 'utf8');
+
+    // Computa dead PL/SQL (procedures/functions não referenciadas por ninguém)
+    const deadPlsql = computeDeadPlsql(plsqlObjects, plsqlCalls, dbCallsData);
+    fs.writeFileSync(path.join(ticCodeDir, 'dead-plsql.json'), JSON.stringify(deadPlsql), 'utf8');
+
     markDone('multigraph');
     report('multigraph', 100, `${callGraph.nodes.length} nós, ${callGraph.edges.length} arestas`);
 
@@ -404,6 +410,30 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0, error
     };
   }
+}
+
+function computeDeadPlsql(plsqlObjects: PlsqlObject[], plsqlCalls: PlsqlCall[], dbCalls: DbCall[]) {
+  // Build set of all called/referenced object names and package names
+  const called = new Set<string>();
+  for (const c of plsqlCalls) {
+    called.add(c.calledObject.toUpperCase());
+    if (c.calledPackage) called.add(c.calledPackage.toUpperCase());
+  }
+  for (const c of dbCalls) {
+    called.add(c.procedureName.toUpperCase());
+    if (c.packageName) called.add(c.packageName.toUpperCase());
+  }
+
+  // A procedure/function is dead if:
+  // - It's not called directly by name
+  // - AND its package (if any) is not called
+  // (if the package is called, we can't be sure the proc is unused — Oracle resolves at runtime)
+  return plsqlObjects.filter((obj) => {
+    if (obj.type !== 'PROCEDURE' && obj.type !== 'FUNCTION') return false;
+    const directlyCalled = called.has(obj.name.toUpperCase());
+    const packageCalled = obj.packageName ? called.has(obj.packageName.toUpperCase()) : false;
+    return !directlyCalled && !packageCalled;
+  });
 }
 
 function writeCopilotInstructions(projectPath: string, projectName: string, totalFiles: number, modules: ReturnType<typeof detectModules>): void {
