@@ -21,6 +21,7 @@ import { detectTransactions, formatTransactionsReport } from './detectTransactio
 import { detectBatchJobs, formatBatchJobsReport } from './detectBatchJobs';
 import { detectAngularModules, formatAngularModulesReport } from './detectAngularModules';
 import { buildCallGraph } from './buildCallGraph';
+import { detectOrmMappings } from './detectOrmMappings';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
 import { computeMetrics } from './computeMetrics';
@@ -309,8 +310,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     report('gaps', 100, 'gaps.md gerado');
 
     // ── 15. MULTI-GRAFO ──────────────────────────────────────────────────────────
-    report('multigraph', 70, 'Construindo grafo Frontend→Endpoint→Backend→PL/SQL...');
-    const callGraph = buildCallGraph(frontendCallsData, endpoints, plsqlObjects, plsqlCalls, dbCallsData);
+    report('multigraph', 70, 'Construindo grafo Frontend→Endpoint→Backend→(PL/SQL + Tabelas)...');
+    const orm = detectOrmMappings(files);
+    const callGraph = buildCallGraph(frontendCallsData, endpoints, plsqlObjects, plsqlCalls, dbCallsData, orm.tableAccess);
     generateMultiGraph(ticCodeDir, callGraph);
     // Salva JSON do call-graph para o visualizador interativo
     fs.writeFileSync(path.join(ticCodeDir, 'call-graph.json'), JSON.stringify(callGraph), 'utf8');

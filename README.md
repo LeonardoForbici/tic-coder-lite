@@ -79,6 +79,13 @@ porque a query atravessa as arestas `call` resolvidas (Fase 1) e os saltos
 HTTP/DB cross-tier num único espaço de nós. Verificação:
 `test/fixtures/crosstier`.
 
+A cadeia também alcança **tabelas** (não só procedures): a camada ORM
+(`detectOrmMappings`) liga `@Entity`/`@Table`, repositórios Spring Data
+(`JpaRepository<Entity, Id>`) e SQL de `@Query`/`createNativeQuery` às tabelas,
+com um extrator SQL **multi-dialeto** (Oracle `schema.tab`, SQL Server
+`[dbo].[x]`, Postgres `"x"."y"`). Assim `trace_flow("PEDIDO")` sobe da tabela
+até a tela. Validado em código real (Spring PetClinic) e em `test/fixtures/orm`.
+
 ---
 
 ## O que é analisado — 30 fases

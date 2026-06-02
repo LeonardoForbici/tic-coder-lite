@@ -162,9 +162,18 @@ export function queryCrossTierTrace(db: Database.Database, entry: string, maxNod
   const codeCallers = db.prepare('SELECT DISTINCT from_file FROM edges WHERE to_file = ?');
   const beNodeForFile = db.prepare("SELECT id FROM cg_nodes WHERE file = ? AND id LIKE 'be_%' LIMIT 1");
   const httpCallers = db.prepare("SELECT from_id FROM cg_edges WHERE to_id = ? AND type = 'HTTP_CALL'");
-  const dbCallers = db.prepare("SELECT from_id FROM cg_edges WHERE to_id = ? AND type = 'DB_CALL'");
-  const plsqlCallers = db.prepare("SELECT from_id FROM cg_edges WHERE to_id = ? AND type = 'PLSQL_CALL'");
+  // DB_CALL (be→proc), PLSQL_CALL (proc→proc) e TABLE_ACCESS (be/proc→tabela)
+  const dbLayerCallers = db.prepare("SELECT from_id FROM cg_edges WHERE to_id = ? AND type IN ('DB_CALL','PLSQL_CALL','TABLE_ACCESS')");
   const cgNodeById = db.prepare('SELECT id, label, layer, file FROM cg_nodes WHERE id = ?');
+
+  /** Mapeia um id de nó cross-tier para o espaço de trace (arquivo ou objeto de banco). */
+  const cgIdToTrace = (id: string): TraceNode | null => {
+    const row = cgNodeById.get(id) as any;
+    if (!row) return null;
+    if (row.layer === 'database') return { key: `db:${row.id}`, label: row.label, layer: 'database' };
+    if (row.file) return nodeForFile(db, row.file);
+    return null;
+  };
 
   const reverseNeighbors = (node: TraceNode): TraceNode[] => {
     const out: TraceNode[] = [];
@@ -180,13 +189,9 @@ export function queryCrossTierTrace(db: Database.Database, entry: string, maxNod
       }
     } else if (node.key.startsWith('db:')) {
       const dbId = node.key.slice('db:'.length);
-      for (const r of dbCallers.all(dbId) as any[]) {
-        const be = cgNodeById.get(r.from_id) as any;
-        if (be?.file) out.push(nodeForFile(db, be.file));
-      }
-      for (const r of plsqlCallers.all(dbId) as any[]) {
-        const caller = cgNodeById.get(r.from_id) as any;
-        if (caller) out.push({ key: `db:${caller.id}`, label: caller.label, layer: 'database' });
+      for (const r of dbLayerCallers.all(dbId) as any[]) {
+        const caller = cgIdToTrace(r.from_id);
+        if (caller) out.push(caller);
       }
     }
     return out;
@@ -237,15 +242,30 @@ function nodeForFile(db: Database.Database, file: string): TraceNode {
 
 function resolveTraceNode(db: Database.Database, entry: string): TraceNode | null {
   const up = entry.toUpperCase();
-  // 1. objeto de banco (package/procedure) — match por label contido em entry ou vice-versa
-  const dbNode = db
-    .prepare(
-      "SELECT id, label FROM cg_nodes WHERE layer = 'database' AND (UPPER(label) = ? OR ? LIKE '%' || UPPER(label) || '%' OR UPPER(label) LIKE '%' || ? || '%') ORDER BY LENGTH(label) DESC LIMIT 1"
-    )
-    .get(up, up, up) as any;
-  if (dbNode) return { key: `db:${dbNode.id}`, label: dbNode.label, layer: 'database' };
+  const asDb = (n: any): TraceNode => ({ key: `db:${n.id}`, label: n.label, layer: 'database' });
+  const exact = db.prepare("SELECT id, label FROM cg_nodes WHERE layer = 'database' AND UPPER(label) = ? LIMIT 1");
 
-  // 2. arquivo de código
+  // 1. match EXATO no objeto de banco (tabela/package/procedure)
+  const direct = exact.get(up) as any;
+  if (direct) return asDb(direct);
+
+  // 2. entry qualificado "PKG.PROC" / "SCHEMA.PKG.PROC" → tenta os segmentos
+  if (up.includes('.')) {
+    for (const seg of up.split('.')) {
+      const hit = exact.get(seg) as any;
+      if (hit) return asDb(hit);
+    }
+  }
+
+  // 3. fuzzy — prefere o label MAIS CURTO (mais específico ao termo), não o maior
+  const fuzzy = db
+    .prepare(
+      "SELECT id, label FROM cg_nodes WHERE layer = 'database' AND (UPPER(label) LIKE ? OR ? LIKE '%' || UPPER(label) || '%') ORDER BY LENGTH(label) ASC LIMIT 1"
+    )
+    .get(`${up}%`, up) as any;
+  if (fuzzy) return asDb(fuzzy);
+
+  // 4. arquivo de código
   const file = resolveFile(db, entry);
   if (file) return nodeForFile(db, file);
   return null;
