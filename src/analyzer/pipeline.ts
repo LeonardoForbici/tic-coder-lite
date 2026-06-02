@@ -432,16 +432,26 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     report('search-index', 100, `${codeFileCount} arquivos indexados`);
 
     // ── 24c. ÍNDICE PERSISTENTE (SQLite) ──────────────────────────────────────────
-    report('persist-index', 95, 'Gerando embeddings locais (busca semântica)...');
-    const embeddings = await computeEmbeddings(searchEntries, (done, total) =>
-      report('persist-index', 95, `Embeddings ${done}/${total}...`)
-    );
-
-    report('persist-index', 97, 'Gravando índice consultável (SQLite)...');
-    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, embeddings });
+    // Tolerante a falha: se o módulo nativo (better-sqlite3) não carregar (ex.: ABI
+    // incompatível Node↔Electron), a análise CONTINUA com os artefatos JSON; o MCP
+    // cai para JSON. Não derruba a análise inteira.
+    try {
+      report('persist-index', 95, 'Gerando embeddings locais (busca semântica)...');
+      const embeddings = await computeEmbeddings(searchEntries, (done, total) =>
+        report('persist-index', 95, `Embeddings ${done}/${total}...`)
+      );
+      report('persist-index', 97, 'Gravando índice consultável (SQLite)...');
+      const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, embeddings });
+      const vecNote = embeddings ? `, ${embeddings.length} embeddings` : ' (embeddings off: modelo indisponível, FTS ativo)';
+      report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)${vecNote}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const nativo = /NODE_MODULE_VERSION|better_sqlite3|did not self-register/i.test(msg);
+      report('persist-index', 100, nativo
+        ? 'index.db pulado: better-sqlite3 precisa de rebuild (rode `npm run rebuild:electron`). Análise OK via JSON.'
+        : `index.db pulado (${msg.slice(0, 80)}). Análise OK via JSON.`);
+    }
     markDone('persist-index');
-    const vecNote = embeddings ? `, ${embeddings.length} embeddings` : ' (embeddings off: modelo indisponível, FTS ativo)';
-    report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)${vecNote}`);
 
     // ── 25. EXPORT JSON ───────────────────────────────────────────────────────────
     report('export-json', 92, 'Exportando analysis.json estruturado...');

@@ -242,11 +242,19 @@ npm run dist:mac     # → release/TIC Analyzer.dmg
 npm run dist:linux   # → release/TIC Analyzer.AppImage
 ```
 
-> **Módulo nativo (`better-sqlite3`):** o `index.db` usa um módulo nativo. O
-> empacotamento (`dist:*`) recompila-o para o runtime do Electron
-> automaticamente (electron-builder). Para `npm run dev`, rode
-> `npm run rebuild:electron` uma vez. Os scripts de verificação (`npm run
-> verify`) rodam sob Node e usam o binário Node-ABI.
+> **Módulo nativo (`better-sqlite3`) — ABI Node × Electron:** o `index.db` usa um
+> módulo nativo. Se aparecer `NODE_MODULE_VERSION ... requires ...` ao abrir o
+> app, recompile para o Electron:
+> ```bash
+> npm run rebuild:electron   # compila better-sqlite3 para o ABI do Electron
+> npm run dev
+> ```
+> O empacotamento (`dist:*`) já faz isso automaticamente. Os scripts `npm run
+> verify`/CLI rodam sob o **Node do sistema** — se você alternar, rode
+> `npm rebuild better-sqlite3` para voltar ao ABI do Node.
+>
+> Mesmo sem o rebuild, a análise **não falha**: o `index.db` é pulado com aviso e
+> tudo segue via artefatos JSON (o MCP cai para JSON, com o limite de ~3000 nós).
 
 ---
 

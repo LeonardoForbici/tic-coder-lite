@@ -8,7 +8,7 @@
  * 100% local/offline. O `.db` fica fora do git (`.tic-code/` é gitignored).
  */
 import * as fs from 'fs';
-import Database from 'better-sqlite3';
+import type DatabaseType from 'better-sqlite3';
 import type { ScannedFile } from '../scanFiles';
 import type { DependencyGraph } from '../buildDependencyGraph';
 import type { CallGraph } from '../buildCallGraph';
@@ -18,6 +18,17 @@ import type { ColumnAccess } from '../detectOrmMappings';
 import { vectorToBlob } from '../semantic/embeddings';
 
 export const INDEX_DB_FILE = 'index.db';
+
+/**
+ * Carrega o better-sqlite3 (módulo nativo) de forma preguiçosa. Mantido fora dos
+ * imports estáticos para que um binário com ABI incompatível (ex.: compilado
+ * para o Node do sistema mas executado no Electron) NÃO derrube todo o pipeline:
+ * o chamador trata a exceção e degrada para os artefatos JSON.
+ */
+function loadSqlite(): typeof DatabaseType {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('better-sqlite3');
+}
 
 const SCHEMA = `
 CREATE TABLE files (
@@ -106,6 +117,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     if (fs.existsSync(f)) fs.rmSync(f);
   }
 
+  const Database = loadSqlite();
   const db = new Database(dbPath);
   try {
     db.pragma('journal_mode = WAL');
@@ -165,10 +177,15 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
   }
 }
 
-/** Abre o index.db em modo leitura para o MCP. Retorna null se ausente. */
-export function openIndexDb(dbPath: string): Database.Database | null {
+/**
+ * Abre o index.db em modo leitura para o MCP. Retorna null se ausente OU se o
+ * módulo nativo não puder ser carregado (ABI incompatível) — nesse caso o MCP
+ * cai para os artefatos JSON, sem quebrar.
+ */
+export function openIndexDb(dbPath: string): DatabaseType.Database | null {
   if (!fs.existsSync(dbPath)) return null;
   try {
+    const Database = loadSqlite();
     return new Database(dbPath, { readonly: true, fileMustExist: true });
   } catch {
     return null;
