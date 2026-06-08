@@ -281,6 +281,21 @@ export class TicAnalyzerMcpServer {
           inputSchema: { type: 'object', properties: {} }
         },
         {
+          name: 'get_security_findings',
+          description: 'Retorna vulnerabilidades específicas de framework: SQLi em ORMs (TypeORM/Sequelize/JPA/JdbcTemplate), misconfig de segurança web (CSRF off, permitAll, @Public) e APIs inseguras/deprecadas. Filtre por category: orm-sqli | web-misconfig | insecure-api.',
+          inputSchema: { type: 'object', properties: { category: { type: 'string', description: 'orm-sqli | web-misconfig | insecure-api' } } }
+        },
+        {
+          name: 'get_clones',
+          description: 'Retorna grupos de clones de código (blocos duplicados/quase-idênticos, tipo-1 e tipo-2). Opcional: filtre por file para ver só clones que tocam um arquivo.',
+          inputSchema: { type: 'object', properties: { file: { type: 'string', description: 'Filtra grupos que incluem este arquivo (relativePath).' } } }
+        },
+        {
+          name: 'get_dead_code',
+          description: 'Retorna dead-code unificado: funções/métodos sem chamadores (advisory), componentes React/Angular sem uso e procedures/functions PL/SQL não referenciadas.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'find_path',
           description: 'Encontra o caminho mais curto (BFS) entre dois arquivos ou objetos PL/SQL no grafo de dependências. Use para descobrir como A se conecta a B. ~200 tokens.',
           inputSchema: {
@@ -796,6 +811,76 @@ export class TicAnalyzerMcpServer {
             if (angular.length > 30) dcLines.push(`*... e mais ${angular.length - 30}*`);
           }
           return respond({ content: [{ type: 'text', text: dcLines.join('\n') }] });
+        }
+
+        case 'get_security_findings': {
+          const sfPath = path.join(this.ticCodePath, 'security-findings.json');
+          if (!fs.existsSync(sfPath)) {
+            return respond({ content: [{ type: 'text', text: 'security-findings.json não encontrado. Execute a análise novamente.' }] });
+          }
+          type SF = { level: string; title: string; file: string; line?: number; category: string; cwe?: string; owasp?: string; remediation?: string };
+          let sf: SF[] = JSON.parse(fs.readFileSync(sfPath, 'utf8'));
+          const cat = ((args as { category?: string }).category ?? '').trim();
+          if (cat) sf = sf.filter((f) => f.category === cat);
+          if (sf.length === 0) {
+            return respond({ content: [{ type: 'text', text: `✅ Nenhuma vulnerabilidade de framework${cat ? ` na categoria ${cat}` : ''}.` }] });
+          }
+          const sfLines = [`# Security Findings — ${sf.length}${cat ? ` (${cat})` : ''}`, '', '| Nível | Regra | OWASP/CWE | Arquivo | Linha | Remediação |', '| --- | --- | --- | --- | --- | --- |'];
+          for (const f of sf.slice(0, 100)) {
+            const tag = [f.owasp, f.cwe].filter(Boolean).join(' / ');
+            sfLines.push(`| ${f.level} | ${f.title.replace(/\|/g, '/')} | ${tag} | \`${f.file}\` | ${f.line ?? ''} | ${(f.remediation ?? '').replace(/\|/g, '/')} |`);
+          }
+          return respond({ content: [{ type: 'text', text: sfLines.join('\n') }] });
+        }
+
+        case 'get_clones': {
+          const clPath = path.join(this.ticCodePath, 'clones.json');
+          if (!fs.existsSync(clPath)) {
+            return respond({ content: [{ type: 'text', text: 'clones.json não encontrado. Execute a análise novamente.' }] });
+          }
+          type CG = { id: number; tokenLength: number; instances: { file: string; startLine: number; endLine: number }[] };
+          const report: { groups: CG[] } = JSON.parse(fs.readFileSync(clPath, 'utf8'));
+          const fileArg = ((args as { file?: string }).file ?? '').trim();
+          let groups = report.groups;
+          if (fileArg) groups = groups.filter((g) => g.instances.some((i) => i.file === fileArg));
+          if (groups.length === 0) {
+            return respond({ content: [{ type: 'text', text: `✅ Nenhum clone${fileArg ? ` envolvendo ${fileArg}` : ''}.` }] });
+          }
+          const clLines = [`# Clones de Código — ${groups.length} grupos${fileArg ? ` (${fileArg})` : ''}`, ''];
+          for (const g of groups.slice(0, 40)) {
+            clLines.push(`## Grupo #${g.id} — ${g.instances.length} ocorrências (~${g.tokenLength} tokens)`);
+            for (const inst of g.instances) clLines.push(`- \`${inst.file}\` linhas ${inst.startLine}–${inst.endLine}`);
+            clLines.push('');
+          }
+          return respond({ content: [{ type: 'text', text: clLines.join('\n') }] });
+        }
+
+        case 'get_dead_code': {
+          const read = <T,>(name: string): T[] => {
+            const p = path.join(this.ticCodePath, name);
+            if (!fs.existsSync(p)) return [];
+            try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return []; }
+          };
+          const deadFns = read<{ file: string; name: string; enclosingType?: string; line: number }>('dead-functions.json');
+          const deadComp = read<{ file: string; type: string }>('dead-components.json');
+          const deadPl = read<{ name: string; type: string; file: string }>('dead-plsql.json');
+          const dcLines2 = [`# Dead Code Unificado`, '', `> ${deadFns.length} funções, ${deadComp.length} componentes, ${deadPl.length} objetos PL/SQL.`, '', '> ⚠️ Funções: heurístico (DI/reflexão geram falsos positivos).', ''];
+          if (deadFns.length) {
+            dcLines2.push(`## Funções/métodos sem chamadores — ${deadFns.length}`);
+            for (const d of deadFns.slice(0, 50)) dcLines2.push(`- \`${d.enclosingType ? d.enclosingType + '.' : ''}${d.name}\` — \`${d.file}\`:${d.line}`);
+            dcLines2.push('');
+          }
+          if (deadComp.length) {
+            dcLines2.push(`## Componentes sem uso — ${deadComp.length}`);
+            for (const d of deadComp.slice(0, 30)) dcLines2.push(`- \`${d.file}\` (${d.type})`);
+            dcLines2.push('');
+          }
+          if (deadPl.length) {
+            dcLines2.push(`## PL/SQL não referenciado — ${deadPl.length}`);
+            for (const d of deadPl.slice(0, 30)) dcLines2.push(`- \`${d.name}\` (${d.type}) — \`${d.file}\``);
+          }
+          if (!deadFns.length && !deadComp.length && !deadPl.length) dcLines2.push('✅ Nenhum dead-code detectado.');
+          return respond({ content: [{ type: 'text', text: dcLines2.join('\n') }] });
         }
 
         case 'find_path': {

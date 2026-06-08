@@ -35,6 +35,9 @@ runPipeline(resolved, (progress) => {
   console.log(`  Hotspots:     ${result.hotspots}`);
   console.log(`  Violacoes:    ${result.violations}`);
   console.log(`  Padroes:      ${result.patterns}`);
+  console.log(`  Seguranca:    ${result.securityFindings} vulnerabilidades de framework`);
+  console.log(`  Clones:       ${result.cloneGroups} grupos`);
+  console.log(`  Dead funcs:   ${result.deadFunctions}`);
   console.log(`  Impacto:      ${result.impactedFiles} arquivos mapeados`);
   console.log(`  Saida:        ${result.outputPath}`);
   process.exit(0);

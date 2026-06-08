@@ -4,6 +4,9 @@ import { scanFiles, type ScannedFile } from './scanFiles';
 import { detectStack } from './detectStack';
 import { detectModules } from './detectModules';
 import { detectRisks } from './detectRisks';
+import { detectFrameworkRisks, formatSecurityFindings } from './detectFrameworkRisks';
+import { detectClones, formatClonesReport } from './detectClones';
+import { computeFunctionMetrics, formatFunctionMetricsReport } from './computeFunctionMetrics';
 import { detectEndpoints } from './detectEndpoints';
 import { buildDependencyGraph, type DependencyGraph } from './buildDependencyGraph';
 import { generateQuickContext } from './generateQuickContext';
@@ -74,6 +77,9 @@ export interface PipelineResult {
   batchJobs: number;
   angularModules: number;
   deadComponents: number;
+  securityFindings: number;
+  cloneGroups: number;
+  deadFunctions: number;
   error?: string;
 }
 
@@ -84,6 +90,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'stack', label: 'Detectando stack', status: 'pending' },
   { id: 'graph', label: 'Mapeando dependências', status: 'pending' },
   { id: 'risks', label: 'Detectando riscos', status: 'pending' },
+  { id: 'framework-risks', label: 'Detectando vulnerabilidades por framework', status: 'pending' },
   { id: 'endpoints', label: 'Detectando endpoints REST', status: 'pending' },
   { id: 'frontend-calls', label: 'Detectando chamadas HTTP (frontend)', status: 'pending' },
   { id: 'plsql', label: 'Analisando procedures PL/SQL', status: 'pending' },
@@ -100,6 +107,8 @@ const PHASES: PipelinePhase[] = [
   { id: 'multigraph', label: 'Gerando multi-grafo (frontend→endpoint→backend→PL/SQL)', status: 'pending' },
   { id: 'impact', label: 'Construindo índice de impacto', status: 'pending' },
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
+  { id: 'function-metrics', label: 'Métricas por função e dead-code', status: 'pending' },
+  { id: 'clones', label: 'Detectando clones de código', status: 'pending' },
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
   { id: 'db-schema', label: 'Detectando schema de banco de dados', status: 'pending' },
@@ -121,6 +130,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
       transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0,
+      securityFindings: 0, cloneGroups: 0, deadFunctions: 0,
       error: `Pasta inválida: "${projectPath}"\n\nSelecione a pasta RAIZ do projeto, não a pasta .tic-code.\nExemplo correto: C:\\Git\\meu-projeto`
     };
   }
@@ -183,6 +193,20 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     const risks = detectRisks(files);
     markDone('risks');
     report('risks', 100, `${risks.length} riscos detectados`);
+
+    // ── 4b. RISCOS POR FRAMEWORK ─────────────────────────────────────────────────
+    report('framework-risks', 28, 'Detectando SQLi em ORMs, misconfig web e APIs inseguras...');
+    const securityFindings = detectFrameworkRisks(files);
+    fs.writeFileSync(path.join(ticCodeDir, 'security-findings.json'), JSON.stringify(securityFindings), 'utf8');
+    fs.writeFileSync(path.join(ticCodeDir, 'security-findings.md'), formatSecurityFindings(securityFindings), 'utf8');
+    // criticals/highs entram no array geral de riscos (absorvidos por quick-context/módulos)
+    for (const f of securityFindings) {
+      if (f.level === 'critical' || f.level === 'high') {
+        risks.push({ level: f.level, title: f.title, file: f.file, line: f.line, detail: f.detail });
+      }
+    }
+    markDone('framework-risks');
+    report('framework-risks', 100, `${securityFindings.length} vulnerabilidades de framework detectadas`);
 
     // ── 5. ENDPOINTS ─────────────────────────────────────────────────────────────
     report('endpoints', 34, 'Detectando endpoints REST...');
@@ -345,6 +369,23 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('metrics');
     report('metrics', 100, `${metrics.hotspotCount} hotspots, ${violations.length} violações arquiteturais`);
 
+    // ── 17b. MÉTRICAS POR FUNÇÃO + DEAD CODE ─────────────────────────────────────
+    report('function-metrics', 80, 'Calculando complexidade por função e funções mortas...');
+    const functionMetrics = await computeFunctionMetrics(files, graph);
+    fs.writeFileSync(path.join(ticCodeDir, 'function-metrics.json'), JSON.stringify({ functions: functionMetrics.functions, deadFunctions: functionMetrics.deadFunctions }), 'utf8');
+    fs.writeFileSync(path.join(ticCodeDir, 'dead-functions.json'), JSON.stringify(functionMetrics.deadFunctions), 'utf8');
+    fs.writeFileSync(path.join(ticCodeDir, 'function-metrics.md'), formatFunctionMetricsReport(functionMetrics), 'utf8');
+    markDone('function-metrics');
+    report('function-metrics', 100, `${functionMetrics.functions.length} funções, ${functionMetrics.deadFunctions.length} possivelmente mortas`);
+
+    // ── 17c. CLONES ───────────────────────────────────────────────────────────────
+    report('clones', 82, 'Procurando blocos de código duplicados...');
+    const cloneReport = await detectClones(files);
+    fs.writeFileSync(path.join(ticCodeDir, 'clones.json'), JSON.stringify(cloneReport), 'utf8');
+    fs.writeFileSync(path.join(ticCodeDir, 'clones.md'), formatClonesReport(cloneReport), 'utf8');
+    markDone('clones');
+    report('clones', 100, `${cloneReport.groups.length} grupos de clones em ${cloneReport.filesAffected} arquivos`);
+
     // ── 18. HERANÇA ───────────────────────────────────────────────────────────────
     report('inheritance', 84, 'Detectando hierarquia de classes...');
     const inheritanceTree = detectInheritance(files, graph.semanticClasses);
@@ -484,7 +525,10 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       transactions: transactionBoundaries.length,
       batchJobs: batchJobs.length,
       angularModules: angularModules.length,
-      deadComponents: deadComponents.length
+      deadComponents: deadComponents.length,
+      securityFindings: securityFindings.length,
+      cloneGroups: cloneReport.groups.length,
+      deadFunctions: functionMetrics.deadFunctions.length
     };
 
   } catch (err) {
@@ -493,7 +537,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       success: false, outputPath: ticCodeDir, totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
-      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, error
+      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0,
+      securityFindings: 0, cloneGroups: 0, deadFunctions: 0, error
     };
   }
 }

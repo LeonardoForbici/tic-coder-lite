@@ -23,10 +23,15 @@ electron/
   preload.ts          ← bridge segura renderer ↔ main
 src/
   analyzer/           ← engine de análise (puro Node.js, zero tokens)
+    semantic/
+      functions.ts    ← walker tree-sitter compartilhado (funções + refs)
     scanFiles.ts
     detectStack.ts
     buildDependencyGraph.ts
     detectRisks.ts
+    detectFrameworkRisks.ts    ← SQLi em ORM, misconfig web, APIs inseguras (por framework)
+    detectClones.ts            ← clones de código (token-based, tipo-1/2)
+    computeFunctionMetrics.ts  ← CC por função + dead-code (funções sem uso)
     detectEndpoints.ts
     detectModules.ts
     generateQuickContext.ts   ← quick-context.md (~12k tokens)
@@ -64,4 +69,5 @@ Configure em `.claude/settings.json` do projeto analisado:
 { "mcpServers": { "tic-analyzer": { "url": "http://localhost:7432/mcp" } } }
 ```
 
-Ferramentas: `list_modules`, `get_module`, `get_quick_context`, `search_module`
+Ferramentas: `list_modules`, `get_module`, `get_quick_context`, `search_module`,
+`get_security_findings`, `get_clones`, `get_dead_code`
