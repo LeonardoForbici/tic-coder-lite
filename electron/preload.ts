@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   getGitDiff: (projectPath: string): Promise<{ files: string[]; error?: string }> =>
     ipcRenderer.invoke('get-git-diff', projectPath),
 
+  getImpactOf: (projectPath: string, entity: string): Promise<unknown> =>
+    ipcRenderer.invoke('get-impact-of', projectPath, entity),
+
   getTokenStats: (): Promise<unknown> =>
     ipcRenderer.invoke('get-token-stats'),
 
