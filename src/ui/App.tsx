@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo, MouseEvent as RMouseEvent } from 'react';
 import mermaid from 'mermaid';
 import { GraphViewer } from './GraphViewer';
+import { HierGraphViewer } from './HierGraphViewer';
+import { HealthDashboard } from './HealthDashboard';
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
 
@@ -15,6 +17,8 @@ declare global {
       openFolder: (path: string) => Promise<void>;
       readFile: (path: string) => Promise<string | null>;
       getGitDiff: (projectPath: string) => Promise<{ files: string[]; error?: string }>;
+      getImpactOf: (projectPath: string, entity: string) => Promise<ImpactOfResponse>;
+      getGraphLevel: (projectPath: string, expanded: string[]) => Promise<unknown>;
       getTokenStats: () => Promise<TokenStats | null>;
       clearTokenStats: () => Promise<void>;
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
@@ -41,10 +45,17 @@ interface AnalysisResult {
   impactedFiles: number; inheritanceClasses: number;
   dbTables: number; cacheHits: number;
   transactions: number; batchJobs: number; angularModules: number; deadComponents: number;
+  impactEdges?: number; healthScore?: number; healthGrade?: string;
   error?: string;
 }
+interface ImpactedNode { id: string; kind: string; depth: number; confidence: string; module?: string; }
+interface ImpactOfResponse {
+  error?: string;
+  impact?: { entity: string; affected: ImpactedNode[]; byKind: Record<string, number>; byModule: Record<string, number>; totalVisited: number; truncated: boolean; candidates?: string[] };
+  blast?: { entity: string; totalAffected: number; truncated: boolean; byKind: Record<string, number>; byModule: Record<string, number>; top: Array<{ id: string; kind: string; depth: number; dependents: number; confidence: string }> };
+}
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'multigraph' | 'modules' | 'impact' | 'metrics' | 'files' | 'docs';
+type Tab = 'overview' | 'health' | 'explorer' | 'multigraph' | 'modules' | 'impact' | 'metrics' | 'files' | 'docs';
 
 const C = { bg: '#0f0f1a', card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
 
@@ -227,7 +238,8 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
   const [loading, setLoading] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
   const [index, setIndex] = useState<Record<string, ImpactEntry> | null>(null);
-  const [activeMode, setActiveMode] = useState<'manual' | 'git'>('manual');
+  const [activeMode, setActiveMode] = useState<'crosstier' | 'manual' | 'git'>('crosstier');
+  const [crossResult, setCrossResult] = useState<ImpactOfResponse | null>(null);
 
   useEffect(() => {
     window.ticAnalyzer.readFile(`${ticCodeDir}/impact-index.json`).then((content) => {
@@ -244,6 +256,15 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
     }
     return entry;
   }, [index]);
+
+  const searchCrossTier = useCallback(async () => {
+    if (!query.trim()) { setCrossResult(null); return; }
+    setLoading(true);
+    setCrossResult(null);
+    const r = await window.ticAnalyzer.getImpactOf(projectPath, query.trim());
+    setCrossResult(r);
+    setLoading(false);
+  }, [projectPath, query]);
 
   const search = useCallback(() => {
     if (!index || !query.trim()) { setResult(''); return; }
@@ -327,10 +348,31 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
           <div style={{ fontSize: '12px', color: C.muted }}>Descubra quais arquivos sao afetados antes de fazer uma mudanca</div>
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={S.tab(activeMode === 'manual')} onClick={() => setActiveMode('manual')}>Manual</button>
+          <button style={S.tab(activeMode === 'crosstier')} onClick={() => setActiveMode('crosstier')}>Cross-tier</button>
+          <button style={S.tab(activeMode === 'manual')} onClick={() => setActiveMode('manual')}>Arquivo</button>
           <button style={S.tab(activeMode === 'git')} onClick={() => setActiveMode('git')}>Git Diff</button>
         </div>
       </div>
+
+      {activeMode === 'crosstier' && (
+        <div>
+          <div style={{ fontSize: '12px', color: C.muted, marginBottom: '10px', padding: '10px', background: '#0d1b2a', borderRadius: '8px', border: `1px solid ${C.border}` }}>
+            Impacto de QUALQUER entidade — arquivo, procedure PL/SQL (<code style={{ color: C.accent }}>PKG.PROC</code>), tabela (<code style={{ color: C.accent }}>CLIENTES</code>) ou coluna (<code style={{ color: C.accent }}>CLIENTES.CPF</code>) — atravessando React → Java → PL/SQL → banco.
+          </div>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+            <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchCrossTier()}
+              placeholder="PKG_CLIENTE.SALVAR · CLIENTES · CLIENTES.CPF · UserService.java"
+              style={{ flex: 1, background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '10px 14px', color: C.text, fontSize: '13px', fontFamily: 'monospace' }} />
+            <button style={S.btn(C.accent)} onClick={searchCrossTier} disabled={loading}>{loading ? '...' : 'Analisar'}</button>
+          </div>
+          {crossResult?.error && (
+            <div style={{ color: C.red, fontSize: '13px', padding: '12px', background: '#1a0d0d', borderRadius: '8px' }}>{crossResult.error}</div>
+          )}
+          {crossResult?.impact && (
+            <CrossTierImpactView impact={crossResult.impact} blast={crossResult.blast} onSelect={(e) => { setQuery(e); }} />
+          )}
+        </div>
+      )}
 
       {activeMode === 'manual' && (
         <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
@@ -373,6 +415,84 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
                 transitivo: <strong style={{ color: C.orange }}>{entry.transitiveCount}</strong>
               </div>
             </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CrossTierImpactView ────────────────────────────────────────────────────────
+const KIND_COLORS: Record<string, string> = { file: '#7c83fd', method: '#9d8cff', plsql: '#f0a500', table: '#56cfad', column: '#4ecdc4' };
+const KIND_LABELS: Record<string, string> = { file: 'arquivo', method: 'método', plsql: 'PL/SQL', table: 'tabela', column: 'coluna' };
+
+function shortImpactId(id: string): string {
+  const i = id.indexOf(':');
+  return i >= 0 ? id.slice(i + 1) : id;
+}
+
+function CrossTierImpactView({ impact, blast, onSelect }: {
+  impact: NonNullable<ImpactOfResponse['impact']>;
+  blast?: ImpactOfResponse['blast'];
+  onSelect: (entity: string) => void;
+}) {
+  const maxDepthShown = 6;
+  const byDepth = useMemo(() => {
+    const m = new Map<number, ImpactedNode[]>();
+    for (const n of impact.affected) {
+      const arr = m.get(n.depth) ?? [];
+      arr.push(n);
+      m.set(n.depth, arr);
+    }
+    return [...m.entries()].sort((a, b) => a[0] - b[0]);
+  }, [impact]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '14px', alignItems: 'baseline', flexWrap: 'wrap' as const, marginBottom: '10px' }}>
+        <span style={{ fontFamily: 'monospace', fontSize: '13px', color: C.accent }}>{impact.entity}</span>
+        <strong style={{ color: C.text }}>{impact.totalVisited} entidades afetadas{impact.truncated ? ' (truncado em 2000)' : ''}</strong>
+        {Object.entries(impact.byKind).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+          <span key={k} style={{ fontSize: '11px', color: KIND_COLORS[k] ?? C.muted }}>● {KIND_LABELS[k] ?? k}: {v}</span>
+        ))}
+      </div>
+      {Object.keys(impact.byModule).length > 0 && (
+        <div style={{ fontSize: '12px', color: C.muted, marginBottom: '12px' }}>
+          Módulos: {Object.entries(impact.byModule).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([m, c]) => `${m} (${c})`).join(' · ')}
+        </div>
+      )}
+      {blast && blast.top.length > 0 && (
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: C.muted, marginBottom: '6px' }}>MAIS CRÍTICOS (por nº de dependentes)</div>
+          {blast.top.slice(0, 8).map((t) => (
+            <div key={t.id} onClick={() => onSelect(t.id)} style={{ display: 'flex', gap: '10px', padding: '5px 0', borderBottom: `1px solid ${C.border}`, fontSize: '12px', cursor: 'pointer' }}>
+              <span style={{ color: KIND_COLORS[t.kind] ?? C.muted, width: '58px', flexShrink: 0 }}>{KIND_LABELS[t.kind] ?? t.kind}</span>
+              <span style={{ fontFamily: 'monospace', color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{shortImpactId(t.id)}</span>
+              <span style={{ color: C.orange, width: '110px', textAlign: 'right' as const }}>{t.dependents} dependentes</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ maxHeight: '320px', overflowY: 'auto' as const }}>
+        {byDepth.slice(0, maxDepthShown).map(([depth, nodes]) => (
+          <div key={depth} style={{ marginBottom: '10px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 600, color: C.muted, marginBottom: '4px' }}>{depth} SALTO(S)</div>
+            {nodes.slice(0, 25).map((n) => (
+              <div key={n.id} onClick={() => onSelect(n.id)} style={{ display: 'flex', gap: '8px', padding: '3px 0', fontSize: '12px', cursor: 'pointer' }}>
+                <span title={n.confidence === 'inferred' ? 'heurístico' : 'resolvido por AST/SQL'}>{n.confidence === 'inferred' ? '🟡' : '🟢'}</span>
+                <span style={{ color: KIND_COLORS[n.kind] ?? C.muted, width: '58px', flexShrink: 0 }}>{KIND_LABELS[n.kind] ?? n.kind}</span>
+                <span style={{ fontFamily: 'monospace', color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{shortImpactId(n.id)}</span>
+                {n.module && <span style={{ color: '#666' }}>{n.module}</span>}
+              </div>
+            ))}
+            {nodes.length > 25 && <div style={{ fontSize: '11px', color: '#666' }}>... e mais {nodes.length - 25} nesta profundidade</div>}
+          </div>
+        ))}
+      </div>
+      {impact.candidates && impact.candidates.length > 0 && (
+        <div style={{ fontSize: '11px', color: C.muted, marginTop: '8px' }}>
+          Outras entidades com esse nome: {impact.candidates.map((c) => (
+            <span key={c} onClick={() => onSelect(c)} style={{ color: C.accent, cursor: 'pointer', marginRight: '8px' }}>{shortImpactId(c)}</span>
           ))}
         </div>
       )}
@@ -1010,6 +1130,8 @@ export function App() {
 
   const TABS: Array<{ id: Tab; label: string }> = [
     { id: 'overview', label: 'Visão Geral' },
+    { id: 'health', label: 'Saúde' },
+    { id: 'explorer', label: 'Explorador' },
     { id: 'impact', label: 'Impacto' },
     { id: 'metrics', label: 'Métricas' },
     { id: 'multigraph', label: 'Multi-Grafo' },
@@ -1098,6 +1220,11 @@ export function App() {
                   <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: C.green }}>Analise concluida</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '16px' }}>
                     {[
+                      ...(typeof result.healthScore === 'number' ? [{
+                        num: `${result.healthScore} ${result.healthGrade ?? ''}`.trim(),
+                        label: 'Health Score',
+                        color: result.healthScore >= 75 ? C.green : result.healthScore >= 60 ? C.orange : C.red
+                      }] : []),
                       { num: result.totalFiles.toLocaleString(), label: 'Arquivos', color: C.accent },
                       { num: result.totalLines.toLocaleString(), label: 'Linhas', color: C.accent },
                       { num: result.modulesGenerated.toString(), label: 'Modulos', color: C.accent },
@@ -1141,7 +1268,7 @@ export function App() {
                         {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
                       </div>
                       <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_diff_impact','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
+                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
                       </div>
@@ -1156,6 +1283,20 @@ export function App() {
                   )}
                 </div>
               </>
+            )}
+
+            {activeTab === 'health' && (
+              <div style={S.card}><HealthDashboard ticCodeDir={result.outputPath} /></div>
+            )}
+
+            {activeTab === 'explorer' && (
+              <div style={S.card}>
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Explorador Hierárquico</div>
+                  <div style={{ fontSize: '12px', color: C.muted }}>Aplicação → Camadas → Módulos → Arquivos → Símbolos · peso da aresta = nº de dependências agregadas</div>
+                </div>
+                <HierGraphViewer projectPath={projectPath} />
+              </div>
             )}
 
             {activeTab === 'impact' && (

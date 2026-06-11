@@ -11,6 +11,8 @@ import {
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount } from './queries';
+import { queryImpactOf, queryBlastRadius, type ImpactOfResult, type BlastRadiusResult } from '../analyzer/store/impactQueries';
+import { queryGraphLevel } from '../analyzer/store/graphQueries';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
@@ -113,8 +115,15 @@ export class TicAnalyzerMcpServer {
         },
         {
           name: 'get_module',
-          description: 'Retorna o contexto completo de um módulo (~75k tokens).',
-          inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }
+          description: 'Retorna o contexto de um módulo. detail="summary" (default, ~1k tokens) traz o início do contexto; detail="full" traz tudo.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              detail: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) ou full' }
+            },
+            required: ['name']
+          }
         },
         {
           name: 'get_quick_context',
@@ -148,8 +157,11 @@ export class TicAnalyzerMcpServer {
         },
         {
           name: 'get_multigraph',
-          description: 'Retorna o multi-grafo: Frontend → Endpoint → Backend → PL/SQL.',
-          inputSchema: { type: 'object', properties: {} }
+          description: 'Retorna o multi-grafo: Frontend → Endpoint → Backend → PL/SQL. detail="summary" (default) traz contagens + amostra; detail="full" traz o grafo inteiro.',
+          inputSchema: {
+            type: 'object',
+            properties: { detail: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) ou full' } }
+          }
         },
         {
           name: 'get_business_rules',
@@ -166,6 +178,56 @@ export class TicAnalyzerMcpServer {
             },
             required: ['file']
           }
+        },
+        {
+          name: 'get_impact_of',
+          description: 'Impacto cross-tier de QUALQUER entidade: arquivo, método, procedure/function PL/SQL, tabela ou coluna. Atravessa camadas (coluna → procedure → DAO Java → endpoint → tela React). Aceita nome livre ("PKG_CLIENTE.SALVAR", "CLIENTES", "CLIENTES.CPF", "UserService.java") ou id canônico ("table:CLIENTES"). ~400-800 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Nome ou id da entidade (arquivo/procedure/tabela/coluna).' },
+              max_depth: { type: 'number', description: 'Profundidade máxima de saltos (opcional).' }
+            },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'get_blast_radius',
+          description: 'Resumo ULTRA-COMPACTO do impacto de uma entidade (~200 tokens): contagens por tipo/módulo + top 20 afetados por criticidade. Use PRIMEIRO, antes de get_impact_of ou de ler arquivos, para decidir se precisa de detalhe.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Nome ou id da entidade (arquivo/procedure/tabela/coluna).' }
+            },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'get_table_impact',
+          description: 'Atalho: impacto de mudar uma tabela ou coluna do banco — quais procedures, triggers, DAOs Java e telas são afetados. ~300 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              table: { type: 'string', description: 'Nome da tabela (ex: "CLIENTES").' },
+              column: { type: 'string', description: 'Coluna específica (opcional, ex: "CPF").' }
+            },
+            required: ['table']
+          }
+        },
+        {
+          name: 'get_graph_level',
+          description: 'Grafo hierárquico agregado (app → layer → module → file → symbol). Sem "expanded": visão por camadas. Expanda passando ids (ex: ["layer:backend","module:cliente"]). Peso da aresta = nº de dependências arquivo→arquivo agregadas. ~300-600 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              expanded: { type: 'array', items: { type: 'string' }, description: 'Ids expandidos: layer:<nome>, module:<nome>, file:<rel_path>.' }
+            }
+          }
+        },
+        {
+          name: 'get_health',
+          description: 'Health score do projeto (0-100, grade A-E) com breakdown por dimensão (dívida, riscos, violações, dead code, acoplamento) e delta vs análise anterior. ~200 tokens.',
+          inputSchema: { type: 'object', properties: {} }
         },
         {
           name: 'get_metrics',
@@ -348,14 +410,14 @@ export class TicAnalyzerMcpServer {
           return respond({ content: [{ type: 'text', text: this.readFile('quick-context.md') }] });
 
         case 'get_module': {
-          const moduleName = (args as { name: string }).name;
+          const { name: moduleName, detail } = args as { name: string; detail?: 'summary' | 'full' };
           const contextPath = path.join(this.ticCodePath, 'modules', moduleName, 'context.md');
-          if (!fs.existsSync(contextPath)) {
-            const found = this.findModuleFuzzy(moduleName);
-            if (found) return respond({ content: [{ type: 'text', text: fs.readFileSync(found, 'utf8') }] });
+          const found = fs.existsSync(contextPath) ? contextPath : this.findModuleFuzzy(moduleName);
+          if (!found) {
             return respond({ content: [{ type: 'text', text: `Módulo "${moduleName}" não encontrado. Disponíveis: ${this.listModuleNames().join(', ')}` }] });
           }
-          return respond({ content: [{ type: 'text', text: fs.readFileSync(contextPath, 'utf8') }] });
+          const full = fs.readFileSync(found, 'utf8');
+          return respond(textResult(detail === 'full' ? full : summarizeDoc(full, `get_module("${moduleName}", detail="full")`)));
         }
 
         case 'search_module': {
@@ -372,7 +434,11 @@ export class TicAnalyzerMcpServer {
           return respond({ content: [{ type: 'text', text: `# Módulo: ${best.name}\n\n${content}` }] });
         }
 
-        case 'get_multigraph': return respond({ content: [{ type: 'text', text: this.readFile('multigraph.md') }] });
+        case 'get_multigraph': {
+          const detail = (args as { detail?: 'summary' | 'full' } | undefined)?.detail;
+          const full = this.readFile('multigraph.md');
+          return respond(textResult(detail === 'full' ? full : summarizeDoc(full, 'get_multigraph(detail="full")')));
+        }
         case 'get_diagram': return respond({ content: [{ type: 'text', text: this.readFile('diagram.md') }] });
         case 'get_openapi': return respond({ content: [{ type: 'text', text: this.readFile('openapi.yaml') }] });
         case 'get_gaps': return respond({ content: [{ type: 'text', text: this.readFile('gaps.md') }] });
@@ -462,6 +528,104 @@ export class TicAnalyzerMcpServer {
           return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
         }
 
+        case 'get_impact_of': {
+          const { entity, max_depth } = args as { entity: string; max_depth?: number };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryImpactOf(db, entity, { maxDepth: max_depth });
+            if (!r) return respond(textResult(`Entidade "${entity}" não encontrada no grafo de impacto. Tente o caminho do arquivo, "PKG.PROCEDURE", "TABELA" ou "TABELA.COLUNA".`));
+            return respond(textResult(formatImpactOf(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_blast_radius': {
+          const { entity } = args as { entity: string };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryBlastRadius(db, entity);
+            if (!r) return respond(textResult(`Entidade "${entity}" não encontrada no grafo de impacto.`));
+            return respond(textResult(formatBlastRadius(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_table_impact': {
+          const { table, column } = args as { table: string; column?: string };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const id = column ? `column:${table.toUpperCase()}.${column.toUpperCase()}` : `table:${table.toUpperCase()}`;
+            const r = queryBlastRadius(db, id);
+            if (!r) {
+              // fallback: resolução por nome livre
+              const fuzzy = queryBlastRadius(db, column ? `${table}.${column}` : table);
+              if (fuzzy) return respond(textResult(formatBlastRadius(fuzzy)));
+              return respond(textResult(`Tabela/coluna "${column ? `${table}.${column}` : table}" não encontrada no grafo de impacto.`));
+            }
+            return respond(textResult(formatBlastRadius(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_graph_level': {
+          const expanded = ((args as { expanded?: string[] } | undefined)?.expanded ?? []).filter((e) => typeof e === 'string');
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const hasModules = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules'").get();
+            if (!hasModules) return respond(textResult('index.db antigo (sem agregação por módulo). Execute a análise novamente.'));
+            const level = queryGraphLevel(db, { expanded });
+            const lines = [
+              `# Grafo agregado${expanded.length ? ` (expandido: ${expanded.join(', ')})` : ' (visão por camadas)'}`,
+              '',
+              '## Nós',
+              ...level.nodes.slice(0, 80).map((n) => `- [${n.kind}] \`${n.id.slice(n.id.indexOf(':') + 1)}\` — ${n.childCount > 0 ? `${n.childCount} filhos, ` : ''}in ${n.inWeight} / out ${n.outWeight}`),
+              level.nodes.length > 80 ? `- ... e mais ${level.nodes.length - 80} nós` : '',
+              '',
+              '## Arestas (peso = dependências agregadas)',
+              ...level.edges
+                .sort((a, b) => b.weight - a.weight)
+                .slice(0, 60)
+                .map((e) => `- \`${e.from.slice(e.from.indexOf(':') + 1)}\` → \`${e.to.slice(e.to.indexOf(':') + 1)}\` (${e.weight}${e.resolvedWeight < e.weight ? `, ${e.resolvedWeight} resolvidas` : ''})`),
+              level.edges.length > 60 ? `- ... e mais ${level.edges.length - 60} arestas` : '',
+              '',
+              '> Para detalhar: get_graph_level(expanded=[..., "module:<nome>"]).'
+            ].filter(Boolean);
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'get_health': {
+          const snapPath = path.join(this.ticCodePath, 'snapshots.json');
+          if (!fs.existsSync(snapPath)) {
+            return respond(textResult('snapshots.json não encontrado. Execute a análise novamente (versão atual gera health score).'));
+          }
+          let snaps: any[] = [];
+          try { snaps = JSON.parse(fs.readFileSync(snapPath, 'utf8')); } catch { /* corrompido */ }
+          if (!Array.isArray(snaps) || snaps.length === 0) {
+            return respond(textResult('Nenhum snapshot de health disponível. Execute a análise.'));
+          }
+          const cur = snaps[snaps.length - 1];
+          const prev = snaps.length > 1 ? snaps[snaps.length - 2] : null;
+          const delta = prev ? Math.round((cur.score - prev.score) * 10) / 10 : null;
+          const lines = [
+            `# Health Score: ${cur.score}/100 (grade ${cur.grade})`,
+            delta !== null ? `Δ vs análise anterior: ${delta > 0 ? '+' : ''}${delta} (era ${prev.score})` : '(primeira análise — sem histórico)',
+            `Analisado em: ${cur.timestamp}${cur.gitSha ? ` · git ${String(cur.gitSha).slice(0, 8)}` : ''}`,
+            '',
+            '## Penalidades por dimensão',
+            '| Dimensão | Penalidade | Bruto |',
+            '| --- | --- | --- |',
+            ...Object.entries(cur.breakdown as Record<string, { penalty: number; raw: number; max: number }>)
+              .sort((a, b) => b[1].penalty - a[1].penalty)
+              .map(([k, v]) => `| ${k} | -${v.penalty} (máx ${v.max}) | ${v.raw} |`),
+            '',
+            `Contagens: riscos ${cur.counts.risks} · violações ${cur.counts.violations} · hotspots ${cur.counts.hotspots} · dead code ${cur.counts.deadComponents + cur.counts.deadPlsql} · arestas resolvidas ${cur.counts.resolvedEdges}/${cur.counts.totalEdges}`,
+            `Histórico: ${snaps.length} análise(s) em snapshots.json`
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
         case 'get_metrics': {
           const modName = (args as { name?: string }).name;
           if (!modName) {
@@ -523,6 +687,44 @@ export class TicAnalyzerMcpServer {
 
           if (changedFiles.length === 0) {
             return respond({ content: [{ type: 'text', text: '✅ Nenhuma mudança detectada no git (working tree limpa).' }] });
+          }
+
+          // Caminho preferido: grafo de impacto unificado (atravessa PL/SQL,
+          // tabelas e colunas — não só imports). Fallback: impact-index.json.
+          const diffDb = openIndexDb(this.indexDbPath);
+          if (diffDb) {
+            try {
+              const hasImpact = !!diffDb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='impact_edges'").get();
+              if (hasImpact) {
+                const lines: string[] = [
+                  '# Impacto das Mudanças Atuais (git diff, cross-tier)',
+                  '',
+                  `${changedFiles.length} arquivo(s) modificado(s):`,
+                  ''
+                ];
+                const allAffected = new Set<string>();
+                const kindTotals: Record<string, number> = {};
+                for (const file of changedFiles.slice(0, 30)) {
+                  const r = queryBlastRadius(diffDb, file, 5);
+                  if (!r || r.totalAffected === 0) {
+                    lines.push(`**\`${file}\`** — sem dependentes mapeados`);
+                    continue;
+                  }
+                  lines.push(`**\`${file}\`** — ${r.totalAffected} afetados (${countsLine(r.byKind)})`);
+                  for (const t of r.top.slice(0, 3)) lines.push(`  • \`${shortId(t.id)}\` (${t.dependents} dependentes)`);
+                  for (const [k, v] of Object.entries(r.byKind)) kindTotals[k] = (kindTotals[k] ?? 0) + v;
+                  const full = queryImpactOf(diffDb, file);
+                  for (const n of full?.affected ?? []) allAffected.add(n.id);
+                }
+                for (const f of changedFiles) allAffected.delete(`file:${f}`);
+                if (changedFiles.length > 30) lines.push(`... e mais ${changedFiles.length - 30} arquivos modificados (analisados os 30 primeiros)`);
+                lines.push('', '---', `**Impacto consolidado (união, sem duplicatas): ${allAffected.size} entidades**`);
+                lines.push('> Detalhe por entidade: get_impact_of(entity) / get_blast_radius(entity).');
+                return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
+              }
+            } finally {
+              diffDb.close();
+            }
           }
 
           const index: ImpactIndex = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
@@ -1553,6 +1755,96 @@ export class TicAnalyzerMcpServer {
   isRunning(): boolean {
     return this.httpServer?.listening ?? false;
   }
+}
+
+// ── Helpers das tools de impacto cross-tier ──────────────────────────────────
+
+function textResult(text: string): { content: Array<{ type: string; text: string }> } {
+  return { content: [{ type: 'text', text }] };
+}
+
+function noIndexDb(): { content: Array<{ type: string; text: string }> } {
+  return textResult('index.db não encontrado. Execute a análise novamente (a versão atual gera o grafo de impacto unificado).');
+}
+
+const KIND_LABEL: Record<string, string> = {
+  file: 'Arquivos', method: 'Métodos', plsql: 'PL/SQL', table: 'Tabelas', column: 'Colunas'
+};
+
+function shortId(id: string): string {
+  if (id.startsWith('file:')) return id.slice(5);
+  if (id.startsWith('method:')) return id.slice(7);
+  return id.slice(id.indexOf(':') + 1);
+}
+
+function countsLine(byKind: Record<string, number>): string {
+  return Object.entries(byKind)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${KIND_LABEL[k] ?? k}: ${v}`)
+    .join(' | ');
+}
+
+function formatImpactOf(r: ImpactOfResult): string {
+  const lines = [
+    `# Impacto de \`${r.entity}\``,
+    '',
+    `**${r.totalVisited} entidades afetadas** — ${countsLine(r.byKind)}`,
+    r.truncated ? '⚠️ Resultado truncado (>2000 nós). Use get_blast_radius para o resumo ou max_depth para limitar.' : ''
+  ];
+  if (Object.keys(r.byModule).length > 0) {
+    lines.push('', '## Por módulo', ...Object.entries(r.byModule).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([m, c]) => `- ${m}: ${c}`));
+  }
+  const byDepth = new Map<number, ImpactOfResult['affected']>();
+  for (const n of r.affected) {
+    const arr = byDepth.get(n.depth) ?? [];
+    arr.push(n);
+    byDepth.set(n.depth, arr);
+  }
+  for (const [depth, nodes] of [...byDepth.entries()].sort((a, b) => a[0] - b[0]).slice(0, 6)) {
+    lines.push('', `## ${depth} salto(s)`);
+    for (const n of nodes.slice(0, 25)) {
+      lines.push(`- ${n.confidence === 'inferred' ? '🟡' : '🟢'} \`${shortId(n.id)}\`${n.module ? ` (${n.module})` : ''}`);
+    }
+    if (nodes.length > 25) lines.push(`- ... e mais ${nodes.length - 25} nesta profundidade`);
+  }
+  if (r.candidates?.length) {
+    lines.push('', `> Outras entidades com esse nome: ${r.candidates.map(shortId).join(', ')}`);
+  }
+  return lines.filter((l) => l !== '').join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+/**
+ * Resumo de documento markdown grande: corta em ~4000 chars num limite de
+ * seção e informa explicitamente como pedir o restante (a IA não fica cega).
+ */
+function summarizeDoc(content: string, fullHint: string): string {
+  const LIMIT = 4000;
+  if (content.length <= LIMIT) return content;
+  let cut = content.lastIndexOf('\n#', LIMIT);
+  if (cut < LIMIT / 2) cut = content.lastIndexOf('\n\n', LIMIT);
+  if (cut < LIMIT / 2) cut = LIMIT;
+  const omitted = content.length - cut;
+  return `${content.slice(0, cut)}\n\n---\n> ⚠️ Resumo truncado (~${Math.ceil(omitted / 4).toLocaleString()} tokens omitidos). Conteúdo completo: \`${fullHint}\`.`;
+}
+
+function formatBlastRadius(r: BlastRadiusResult): string {
+  const lines = [
+    `# Blast radius de \`${r.entity}\``,
+    '',
+    `**${r.totalAffected} entidades afetadas**${r.truncated ? ' (truncado em 2000 — há mais)' : ''} — ${countsLine(r.byKind)}`
+  ];
+  if (Object.keys(r.byModule).length > 0) {
+    lines.push(`Módulos: ${Object.entries(r.byModule).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([m, c]) => `${m} (${c})`).join(', ')}`);
+  }
+  if (r.top.length > 0) {
+    lines.push('', '## Mais críticos (por nº de dependentes)', '| Entidade | Tipo | Saltos | Dependentes |', '| --- | --- | --- | --- |');
+    for (const t of r.top) {
+      lines.push(`| \`${shortId(t.id)}\` | ${t.kind} | ${t.depth} | ${t.dependents} |`);
+    }
+  }
+  lines.push('', '> Detalhe completo: get_impact_of(entity). Lineage de colunas: get_table_columns(tabela).');
+  if (r.candidates?.length) lines.push(`> Outras entidades com esse nome: ${r.candidates.map(shortId).join(', ')}`);
+  return lines.join('\n');
 }
 
 function scoreMatch(moduleName: string, query: string): number {
