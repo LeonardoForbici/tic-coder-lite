@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { HierGraphViewer } from './HierGraphViewer';
 import { HealthDashboard } from './HealthDashboard';
+import { GovernanceDashboard } from './GovernanceDashboard';
 
 declare global {
   interface Window {
@@ -15,6 +16,9 @@ declare global {
       getGitDiff: (projectPath: string) => Promise<{ files: string[]; error?: string }>;
       getImpactOf: (projectPath: string, entity: string) => Promise<ImpactOfResponse>;
       getGraphLevel: (projectPath: string, expanded: string[]) => Promise<unknown>;
+      updateTriage: (projectPath: string, id: string, changes: unknown) => Promise<unknown>;
+      createTriage: (projectPath: string, input: unknown) => Promise<unknown>;
+      openArchReport: (projectPath: string) => Promise<unknown>;
       getTokenStats: () => Promise<TokenStats | null>;
       clearTokenStats: () => Promise<void>;
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
@@ -51,7 +55,7 @@ interface ImpactOfResponse {
   blast?: { entity: string; totalAffected: number; truncated: boolean; byKind: Record<string, number>; byModule: Record<string, number>; top: Array<{ id: string; kind: string; depth: number; dependents: number; confidence: string }> };
 }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'health' | 'explorer' | 'impact' | 'metrics' | 'files' | 'docs';
+type Tab = 'overview' | 'health' | 'governance' | 'explorer' | 'impact' | 'metrics' | 'files' | 'docs';
 
 const C = { bg: '#0f0f1a', card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
 
@@ -1059,6 +1063,7 @@ export function App() {
   const TABS: Array<{ id: Tab; label: string }> = [
     { id: 'overview', label: 'Visão Geral' },
     { id: 'health', label: 'Saúde' },
+    { id: 'governance', label: 'Governança' },
     { id: 'explorer', label: 'Explorador' },
     { id: 'impact', label: 'Impacto' },
     { id: 'metrics', label: 'Métricas' },
@@ -1213,6 +1218,10 @@ export function App() {
 
             {activeTab === 'health' && (
               <div style={S.card}><HealthDashboard ticCodeDir={result.outputPath} /></div>
+            )}
+
+            {activeTab === 'governance' && (
+              <div style={S.card}><GovernanceDashboard ticCodeDir={result.outputPath} projectPath={projectPath} /></div>
             )}
 
             {activeTab === 'explorer' && (
