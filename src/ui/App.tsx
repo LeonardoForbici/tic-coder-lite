@@ -816,24 +816,29 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
                 dica: 'O contador de Hotspots e Violações em vermelho indica onde focar a atenção antes de mexer no código.'
               },
               {
+                name: 'Saúde',
+                desc: 'Health score do projeto (0–100, grade A–E) com gauge, barras de penalidade por dimensão (dívida, riscos, violações, dead code, acoplamento, resolução) e gráfico de tendência entre análises (snapshots.json).',
+                dica: 'Rode análises periódicas — a linha de tendência mostra se o projeto está melhorando ou apodrecendo commit a commit.'
+              },
+              {
+                name: 'Governança',
+                desc: 'Centro de governança de engenharia: KPIs (Impact Score, Risk Level, Modules, Architecture Drift), tendência de impacto dos PRs, fila de triagem com máquina de estados (skill triage), compliance das regras .tic-rules.json e histórico de PRs analisados. Botão para gerar o relatório de arquitetura em HTML.',
+                dica: 'Riscos critical/high e violações de regra viram itens de triagem automaticamente — mova para ready-for-agent e peça o brief via MCP get_agent_brief(id).'
+              },
+              {
+                name: 'Explorador',
+                desc: 'Drill-down hierárquico estilo CAST Imaging: aplicação → camadas → módulos → arquivos → símbolos. Duplo-clique expande um nó, breadcrumb colapsa de volta. Renderiza só o nível visível — funciona em projetos de 74k+ arquivos.',
+                dica: 'Peso da aresta = nº de dependências agregadas. Verde = resolvida por AST; âmbar = heurística.'
+              },
+              {
                 name: 'Impacto',
-                desc: 'Análise de impacto de mudança. Tem dois modos: Manual (busca um arquivo específico) e Git Diff (lê automaticamente git diff HEAD + staged + untracked e mostra o impacto consolidado de todas as mudanças pendentes).',
+                desc: 'Análise de impacto em três modos: Cross-tier (qualquer entidade — procedure, tabela, coluna, arquivo — atravessando todas as camadas), Arquivo (dependentes por imports) e Git Diff (impacto consolidado de tudo que mudou).',
                 dica: 'Use o modo Git Diff antes de fazer commit para saber quantos arquivos sua mudança vai afetar.'
               },
               {
                 name: 'Métricas',
                 desc: 'Complexidade ciclomática por arquivo, debt score por módulo, hotspots (alta complexidade + alto acoplamento) e violações arquiteturais (dependências circulares, frontend importando backend diretamente, etc).',
                 dica: 'Arquivos com complexidade > 30 (🔴) merecem refatoração antes de novos features.'
-              },
-              {
-                name: 'Multi-Grafo',
-                desc: 'Grafo interativo que mostra o fluxo completo: Frontend → Endpoint REST → Backend → PL/SQL. Clique em um nó para ver o arquivo de origem. Use filtro por camada e busca por nome.',
-                dica: '🟢 = conexão detectada diretamente no código. 🟡 = inferida por heurística de nomes.'
-              },
-              {
-                name: 'Módulos',
-                desc: 'Diagrama Mermaid com as dependências entre módulos do projeto, gerado por análise de imports.',
-                dica: 'Módulos com muitas setas entrando são os mais críticos — mudanças neles têm alto impacto.'
               },
               {
                 name: 'Arquivos',
@@ -861,8 +866,23 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
               { tool: 'list_modules()', tokens: '~2k', desc: 'Lista todos os módulos detectados com contagem de arquivos e linguagens. Use para escolher qual módulo explorar.' },
               { tool: 'get_module("nome")', tokens: '~75k', desc: 'Contexto completo de um módulo específico: arquivos, código dos principais, dependências, riscos e endpoints do módulo.' },
               { tool: 'search_module("query")', tokens: '~75k', desc: 'Busca o módulo mais relevante para um termo. Use quando não sabe o nome exato do módulo.' },
+              { tool: 'get_blast_radius("entidade")', tokens: '~200', desc: 'Resumo ULTRA-COMPACTO do impacto de qualquer entidade (arquivo, procedure, tabela, coluna): contagens por tipo/módulo + top críticos. Use PRIMEIRO, antes de tudo.' },
+              { tool: 'get_impact_of("entidade")', tokens: '~600', desc: 'Impacto cross-tier detalhado de qualquer entidade, agrupado por profundidade e módulo. Atravessa coluna → procedure → DAO → endpoint → tela.' },
+              { tool: 'get_table_impact("TABELA", "COLUNA")', tokens: '~300', desc: 'Atalho: quem é afetado por mudar uma tabela ou coluna do banco — procedures, triggers, DAOs e telas.' },
               { tool: 'get_impact("arquivo.ts")', tokens: '~200', desc: 'Retorna quantos arquivos dependem do arquivo informado (direto + transitivo). Use antes de alterar um arquivo.' },
-              { tool: 'get_diff_impact()', tokens: '~300', desc: 'Lê git diff + staged + untracked e retorna o impacto consolidado de TODAS as mudanças pendentes. Use antes de commitar.' },
+              { tool: 'get_diff_impact()', tokens: '~300', desc: 'Lê git diff + staged + untracked e retorna o impacto cross-tier consolidado de TODAS as mudanças pendentes. Use antes de commitar.' },
+              { tool: 'get_health()', tokens: '~200', desc: 'Health score atual (0–100, grade A–E) com breakdown por dimensão e delta vs análise anterior.' },
+              { tool: 'get_arch_rules()', tokens: '~300', desc: 'Regras de arquitetura do .tic-rules.json com status de compliance e violações atuais (architecture drift).' },
+              { tool: 'get_arch_suggestions()', tokens: '~400', desc: 'Oportunidades de melhoria arquitetural (skill improve-codebase-architecture): módulos pass-through (deletion test), acoplamento alto, god modules e circulares — com sugestão de padrão.' },
+              { tool: 'get_risk_prediction()', tokens: '~300', desc: 'Manutenção preditiva: onde o próximo bug tende a nascer (churn git × complexidade × acoplamento), com score 0–100 e motivos.' },
+              { tool: 'get_agent_brief("entidade")', tokens: '~600', desc: 'AGENT-BRIEF (skill triage): brief completo e acionável — Category, Summary, Current/Desired behavior, Key interfaces, Acceptance criteria e Out of scope — preenchido pelo grafo. Pronto para issue ou para um agente implementar.' },
+              { tool: 'get_diagnosis("de", "para")', tokens: '~700', desc: 'Diagnose disciplinado (skill diagnose): 6 fases — feedback loop primeiro, reprodução pelo caminho do grafo, hipóteses falsificáveis ranqueadas por risco, instrumentação 1-a-1 e post-mortem.' },
+              { tool: 'get_zoom_out("entidade")', tokens: '~400', desc: 'Zoom-out (skill zoom-out): sem parâmetro = visão macro do sistema por fronteiras de domínio; com entidade = onde aquela parte se encaixa e quem a chama, em vocabulário de módulos.' },
+              { tool: 'get_out_of_scope()', tokens: '~150', desc: 'Catálogo de decisões out-of-scope registradas no .tic-rules.json — o que o time já decidiu NÃO fazer, para não rediscutir.' },
+              { tool: 'list_triage(state, category)', tokens: '~300', desc: 'Fila de triagem (skill triage): itens com categoria bug/enhancement, estado da máquina (needs-triage, ready-for-agent...) e prioridade.' },
+              { tool: 'update_triage(id, state)', tokens: '~50', desc: 'Transiciona um item da fila de triagem — transições validadas pela máquina de estados da skill.' },
+              { tool: 'get_graph_level(expanded)', tokens: '~500', desc: 'Grafo hierárquico agregado (app → layer → module → file → symbol) — o mesmo dado da aba Explorador, para a IA navegar a arquitetura.' },
+              { tool: 'trace_flow("entidade")', tokens: '~1.5k', desc: 'Cadeia de impacto ininterrupta entre camadas: tela → endpoint → service → procedure → tabela, com método chamador anotado.' },
               { tool: 'get_metrics("módulo")', tokens: '~500', desc: 'Complexidade ciclomática, debt score e hotspots de um módulo. Sem parâmetro, retorna o resumo do projeto inteiro.' },
               { tool: 'get_hotspots()', tokens: '~1k', desc: 'Top arquivos com maior dívida técnica do projeto (alta complexidade + alto acoplamento).' },
               { tool: 'get_violations()', tokens: '~1k', desc: 'Lista violações arquiteturais: dependências circulares, frontend importando backend, controller acessando BD direto.' },
@@ -898,12 +918,21 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
               { file: 'quick-context.md', tokens: '~12k', desc: 'Resumo geral do projeto. Ponto de partida para qualquer IA. Contém stack, módulos, top riscos, top endpoints e instruções de navegação.' },
               { file: 'index.md', tokens: '~2k', desc: 'Mapa de navegação com links para todos os módulos, contagem de arquivos e linguagens por módulo.' },
               { file: 'impact-index.json', tokens: 'JSON', desc: 'Índice de impacto de mudança. Para cada arquivo, lista quem depende dele (direto + transitivo). Consultado pontualmente via MCP.' },
+              { file: 'index.db', tokens: 'SQLite', desc: 'Fonte de verdade das consultas: grafo completo (sem teto de nós), símbolos, impacto unificado cross-tier, módulos e busca FTS5.' },
+              { file: 'snapshots.json', tokens: 'JSON', desc: 'Histórico de health score entre análises (alimenta a tendência da aba Saúde). Sobrevive entre execuções.' },
+              { file: 'triage.json', tokens: 'JSON', desc: 'Fila de triagem (skill triage): itens bug/enhancement com estado da máquina, prioridade e histórico de transições.' },
+              { file: 'arch-violations.json', tokens: 'JSON', desc: 'Regras do .tic-rules.json + violações atuais + decisões out-of-scope (alimenta a aba Governança e o gate do PR).' },
+              { file: 'arch-suggestions.json', tokens: 'JSON', desc: 'Candidatos a melhoria arquitetural (deletion test, acoplamento, god modules) — base do relatório HTML.' },
+              { file: 'risk-prediction.json', tokens: 'JSON', desc: 'Predição de risco por arquivo (churn × complexidade × acoplamento), com score e motivos.' },
+              { file: 'pr-history.json', tokens: 'JSON', desc: 'Histórico de PR reviews (blast radius, riscos novos, gates) — alimenta o Recent PRs da aba Governança.' },
+              { file: 'zoom-out.md', tokens: '~500', desc: 'Visão executiva: diagrama Mermaid das fronteiras de domínio (camadas e módulos), sem nomes de arquivo.' },
+              { file: 'tic-rules.example.json', tokens: 'JSON', desc: 'Exemplo de regras de arquitetura — copie para a raiz do projeto como .tic-rules.json e ajuste.' },
               { file: 'metrics-summary.md', tokens: '~2k', desc: 'Resumo de qualidade: top hotspots, complexidade por módulo, debt score e violações arquiteturais.' },
               { file: 'patterns.md', tokens: '~1k', desc: 'Padrões arquiteturais detectados em todo o projeto (Repository, Service, Controller, Factory, DTO...).' },
               { file: 'inheritance.md', tokens: '~1k', desc: 'Hierarquia de classes: extends/implements, profundidade máxima de herança.' },
               { file: 'multigraph.md', tokens: '~3k', desc: 'Diagrama Mermaid do fluxo de chamadas: Frontend → Endpoint → Backend → PL/SQL.' },
-              { file: 'call-graph.json', tokens: 'JSON', desc: 'Dados brutos do call graph para o visualizador interativo na aba Multi-Grafo.' },
-              { file: 'dep-graph.json', tokens: 'JSON', desc: 'Dados brutos do grafo de dependências para o visualizador na aba Métricas.' },
+              { file: 'call-graph.json', tokens: 'JSON', desc: 'Dados brutos do call graph multi-camada (Frontend→Endpoint→Backend→PL/SQL).' },
+              { file: 'dep-graph.json', tokens: 'JSON', desc: 'Amostra do grafo de dependências (o grafo completo vive no index.db, consultado pelo Explorador).' },
               { file: 'diagram.md', tokens: '~1k', desc: 'Diagrama Mermaid das dependências entre módulos.' },
               { file: 'openapi.yaml', tokens: '~2k', desc: 'Especificação OpenAPI 3.0 dos endpoints detectados.' },
               { file: 'permissions.md', tokens: '~1k', desc: 'Matriz de permissões: rota × método × roles extraídos de decorators/annotations.' },
@@ -1199,7 +1228,7 @@ export function App() {
                         {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
                       </div>
                       <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
+                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_arch_rules','get_arch_suggestions','get_risk_prediction','get_agent_brief','get_diagnosis','get_zoom_out','get_out_of_scope','list_triage','update_triage','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
                       </div>
