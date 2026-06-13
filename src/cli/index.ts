@@ -19,6 +19,9 @@ import { compareAnalyses, evaluateGates, formatPrComment, appendPrHistory } from
 import { TicAnalyzerMcpServer } from '../mcp/server';
 import { buildAgentBrief } from '../mcp/agentBrief';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
+import { loadActivity } from '../analyzer/store/activityLog';
+import { loadArchRules } from '../analyzer/checkArchRules';
+import { dispatchAlerts } from '../analyzer/notify';
 
 interface Args {
   positional: string[];
@@ -50,9 +53,10 @@ function usage(): never {
                [--out report.md] [--gate new-high-risks,new-violations,health-drop:5]
                [--changed arquivo1,arquivo2 | --base-ref <ref>]
   tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>]
-               [--no-analyze] [--watch <minutos>]          MCP server headless (máquina dedicada).
+               [--no-analyze] [--watch <minutos>] [--debounce <seg>]   MCP server vivo (máquina dedicada).
                --host 0.0.0.0 expõe na rede — USE --token (ou TIC_TOKEN).
-               --watch N re-analisa a cada N minutos (índice sempre fresco p/ o time)`);
+               File-watch reativo + push SSE em /events + alertas (.tic-rules.json → alerts).
+               --debounce N (default 15s) espera N s após o último save; --watch N = rede de segurança periódica`);
   process.exit(2);
 }
 
@@ -188,12 +192,33 @@ async function cmdServe(args: Args): Promise<number> {
     return 2;
   }
 
+  const ticCodeDir = path.join(projectPath, '.tic-code');
+  const server = new TicAnalyzerMcpServer({ projectPath });
+
+  // Após cada análise: push SSE dos eventos novos + alertas outbound.
+  const broadcast = async (beforeCount: number) => {
+    const events = loadActivity(ticCodeDir);
+    const fresh = events.slice(beforeCount);
+    for (const e of fresh) server.emit(e);
+    server.emit({ type: 'analysis-complete', ts: new Date().toISOString() });
+    const cfg = loadArchRules(projectPath);
+    if (cfg?.alerts) {
+      const sent = await dispatchAlerts(fresh, cfg.alerts, path.basename(projectPath));
+      for (const s of sent) if (s.ok) console.error(`[alert] ${s.channel}: ${s.count} evento(s) enviado(s)`);
+    }
+  };
+
   const analyzeOnce = async (): Promise<boolean> => {
+    const before = loadActivity(ticCodeDir).length;
     const r = await runPipeline(projectPath, (p) => {
       if (p.percent === 100) process.stderr.write(`[analyze] ${p.phase}: ${p.detail}\n`);
     }, { skipAiFiles: args.flags.has('no-ai-files') });
-    if (r.success) console.error(`[analyze] ok — health ${r.healthScore}/100, ${r.totalFiles.toLocaleString()} arquivos`);
-    else console.error(`[analyze] falhou: ${r.error}`);
+    if (r.success) {
+      console.error(`[analyze] ok — health ${r.healthScore}/100, ${r.totalFiles.toLocaleString()} arquivos`);
+      await broadcast(before);
+    } else {
+      console.error(`[analyze] falhou: ${r.error}`);
+    }
     return r.success;
   };
 
@@ -201,12 +226,34 @@ async function cmdServe(args: Args): Promise<number> {
     if (!(await analyzeOnce())) return 2;
   }
 
-  const server = new TicAnalyzerMcpServer({ projectPath });
   await server.startHttp(port, host, token);
+
+  // ── File-watch reativo (olhos do sistema vivo): reage a SAVES, debounced ────
+  const debounceMs = Number(args.flags.get('debounce') ?? 15) * 1000;
+  const IGNORE = /(^|[\\/])(\.tic-code|\.git|node_modules|dist|build|target|out)([\\/]|$)/;
+  let timer: NodeJS.Timeout | null = null;
+  let analyzing = false;
+  const trigger = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (analyzing) { trigger(); return; }
+      analyzing = true;
+      void analyzeOnce().finally(() => { analyzing = false; });
+    }, debounceMs);
+  };
+  try {
+    fs.watch(projectPath, { recursive: true }, (_e, filename) => {
+      if (filename && !IGNORE.test(String(filename))) trigger();
+    });
+    console.error(`[watch] file-watch reativo ativo (debounce ${debounceMs / 1000}s) · SSE em /events`);
+  } catch {
+    // Plataforma/Node sem recursive: cai para o periódico abaixo
+    console.error('[watch] file-watch recursivo indisponível — usando apenas --watch periódico');
+  }
 
   const watchMin = Number(args.flags.get('watch') ?? 0);
   if (watchMin > 0) {
-    console.error(`[watch] re-análise incremental a cada ${watchMin} min`);
+    console.error(`[watch] rede de segurança: re-análise a cada ${watchMin} min`);
     setInterval(() => { void analyzeOnce(); }, watchMin * 60_000);
   }
 

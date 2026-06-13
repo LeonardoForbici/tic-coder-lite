@@ -80,6 +80,14 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
 
   useEffect(loadAll, [loadAll]);
 
+  // Sistema vivo: recarrega sozinho quando uma nova análise é concluída
+  useEffect(() => {
+    const off = window.ticAnalyzer.onActivity?.((e: { type?: string }) => {
+      if (e?.type === 'analysis') loadAll();
+    });
+    return off;
+  }, [loadAll]);
+
   const transition = useCallback(async (id: string, state: string) => {
     const r = (await window.ticAnalyzer.updateTriage(projectPath, id, { state })) as { ok: boolean; error?: string };
     setMsg(r.ok ? '' : r.error ?? 'erro');

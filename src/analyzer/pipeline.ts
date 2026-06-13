@@ -39,9 +39,11 @@ import { buildSearchIndex } from './buildSearchIndex';
 import { writeIndexDb, INDEX_DB_FILE } from './store/indexDb';
 import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
 import { computeHealthScore } from './computeHealthScore';
-import { appendSnapshot } from './store/snapshots';
+import { appendSnapshot, loadSnapshots } from './store/snapshots';
 import { loadArchRules, checkArchRules, buildFileInfoLookup, writeRulesExample, findDeepeningCandidates } from './checkArchRules';
-import { collectChurn, predictRisk } from './computeRiskPrediction';
+import { collectChurn, predictRisk, type RiskPrediction } from './computeRiskPrediction';
+import { appendEvents, makeEvent } from './store/activityLog';
+import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
 import { syncTriageItems, type TriageCandidate } from './store/triageStore';
 import { generateZoomOut } from './generateZoomOut';
 
@@ -91,6 +93,7 @@ export interface PipelineResult {
   archViolations?: number;
   riskPredictions?: number;
   triageItems?: number;
+  activityEvents?: number;
   /** Duração (ms) por fase — para identificar gargalos em projetos grandes. */
   phaseTimings?: Record<string, number>;
   error?: string;
@@ -137,6 +140,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'health', label: 'Computando health score do projeto', status: 'pending' },
   { id: 'triage', label: 'Sincronizando fila de triagem', status: 'pending' },
   { id: 'zoom-out', label: 'Gerando visão executiva (zoom-out)', status: 'pending' },
+  { id: 'activity', label: 'Registrando atividade (delta + predição)', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
   { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
@@ -185,6 +189,16 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── CACHE ─────────────────────────────────────────────────────────────────────
     const previousCache = loadFileCache(ticCodeDir);
+
+    // Estado ANTERIOR (lido antes de qualquer overwrite) — base do self-delta e
+    // do loop de aprendizado preditivo na fase 'activity'.
+    const readPrev = (file: string): any => {
+      try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, file), 'utf8')); } catch { return null; }
+    };
+    const previousAnalysis = readPrev('analysis.json');
+    const previousPrediction: RiskPrediction[] = Array.isArray(readPrev('risk-prediction.json')) ? readPrev('risk-prediction.json') : [];
+    const previousSnapshots = loadSnapshots(ticCodeDir);
+    const previousAccuracy = readPrev('prediction-accuracy.json');
 
     // ── 1. SCAN ──────────────────────────────────────────────────────────────────
     report('scan', 5, 'Iniciando scan...');
@@ -582,6 +596,31 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('zoom-out');
     report('zoom-out', 100, 'zoom-out.md gerado');
 
+    // ── 24d. ATIVIDADE (self-delta + loop preditivo) — o batimento do sistema ────
+    report('activity', 94, 'Computando o que mudou desde a última análise...');
+    const curDelta = {
+      snapshot: { score: health.score, counts: { risks: risks.length, violations: violations.length, modules: modules.length, hotspots: metrics.hotspotCount } },
+      analysis: {
+        risks: { items: risks.map((r) => ({ level: r.level, title: r.title, file: r.file })) },
+        archViolations: { items: archViolations.map((v) => ({ ruleId: v.ruleId, severity: v.severity, from: v.from, to: v.to })) },
+        modules: modules.map((m) => ({ name: m.name }))
+      }
+    };
+    const prevDelta = previousAnalysis && previousSnapshots.length > 0
+      ? { snapshot: { score: previousSnapshots[previousSnapshots.length - 1].score, counts: { risks: 0, violations: 0, modules: 0, hotspots: 0 } }, analysis: previousAnalysis }
+      : null;
+    const deltaEvents = computeSelfDelta(prevDelta, curDelta);
+    const newRiskFiles = new Set(deltaEvents.filter((e) => e.type === 'risk-new' && e.entity).map((e) => e.entity!.replace(/^file:/, '')));
+    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null);
+    fs.writeFileSync(path.join(ticCodeDir, 'prediction-accuracy.json'), JSON.stringify(accuracy), 'utf8');
+    const summary = makeEvent('analysis', 'info',
+      `Análise concluída — health ${health.score}/100 (${health.grade})`,
+      `${files.length.toLocaleString()} arquivos · ${deltaEvents.length} mudança(s) detectada(s)`);
+    const allEvents = [summary, ...deltaEvents, ...predEvents];
+    appendEvents(ticCodeDir, allEvents);
+    markDone('activity');
+    report('activity', 100, `${deltaEvents.length} mudança(s), ${predEvents.length} predição(ões) confirmada(s)`);
+
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');
     const searchEntries = buildSearchIndex(files, ticCodeDir);
@@ -656,6 +695,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       archViolations: archViolations.length,
       riskPredictions: riskPredictions.length,
       triageItems: triageStats.total,
+      activityEvents: allEvents.length,
       phaseTimings
     };
 

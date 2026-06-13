@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { HierGraphViewer } from './HierGraphViewer';
 import { HealthDashboard } from './HealthDashboard';
+import { ActivityFeed, type ActivityEvent } from './ActivityFeed';
 import { GovernanceDashboard } from './GovernanceDashboard';
 
 declare global {
@@ -19,6 +20,9 @@ declare global {
       updateTriage: (projectPath: string, id: string, changes: unknown) => Promise<unknown>;
       createTriage: (projectPath: string, input: unknown) => Promise<unknown>;
       openArchReport: (projectPath: string) => Promise<unknown>;
+      setLiveMode: (projectPath: string, on: boolean) => Promise<{ ok: boolean; live: boolean; error?: string }>;
+      getActivity: (projectPath: string, limit?: number) => Promise<ActivityEvent[]>;
+      onActivity: (cb: (e: ActivityEvent) => void) => () => void;
       getTokenStats: () => Promise<TokenStats | null>;
       clearTokenStats: () => Promise<void>;
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
@@ -55,7 +59,7 @@ interface ImpactOfResponse {
   blast?: { entity: string; totalAffected: number; truncated: boolean; byKind: Record<string, number>; byModule: Record<string, number>; top: Array<{ id: string; kind: string; depth: number; dependents: number; confidence: string }> };
 }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'health' | 'governance' | 'explorer' | 'impact' | 'metrics' | 'files' | 'docs';
+type Tab = 'overview' | 'health' | 'governance' | 'activity' | 'explorer' | 'impact' | 'metrics' | 'files' | 'docs';
 
 const C = { bg: '#0f0f1a', card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
 
@@ -826,6 +830,11 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
                 dica: 'Riscos critical/high e violações de regra viram itens de triagem automaticamente — mova para ready-for-agent e peça o brief via MCP get_agent_brief(id).'
               },
               {
+                name: 'Atividade',
+                desc: 'A pulsação do projeto: linha do tempo do que mudou a cada análise (health subiu/caiu, riscos novos, regras violadas, módulos add/removidos, predições confirmadas) + taxa de acerto do loop preditivo. Atualiza ao vivo quando o modo Ao Vivo está ligado.',
+                dica: 'Ligue o botão "Ao Vivo" no topo: o app re-analisa sozinho ao salvar um arquivo e a timeline (e os dashboards) atualizam sem você clicar em nada.'
+              },
+              {
                 name: 'Explorador',
                 desc: 'Drill-down hierárquico estilo CAST Imaging: aplicação → camadas → módulos → arquivos → símbolos. Duplo-clique expande um nó, breadcrumb colapsa de volta. Renderiza só o nível visível — funciona em projetos de 74k+ arquivos.',
                 dica: 'Peso da aresta = nº de dependências agregadas. Verde = resolvida por AST; âmbar = heurística.'
@@ -872,6 +881,7 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
               { tool: 'get_impact("arquivo.ts")', tokens: '~200', desc: 'Retorna quantos arquivos dependem do arquivo informado (direto + transitivo). Use antes de alterar um arquivo.' },
               { tool: 'get_diff_impact()', tokens: '~300', desc: 'Lê git diff + staged + untracked e retorna o impacto cross-tier consolidado de TODAS as mudanças pendentes. Use antes de commitar.' },
               { tool: 'get_health()', tokens: '~200', desc: 'Health score atual (0–100, grade A–E) com breakdown por dimensão e delta vs análise anterior.' },
+              { tool: 'get_activity(limit)', tokens: '~300', desc: 'Linha do tempo do que mudou nas últimas análises (sistema vivo): health, riscos novos, regras, predições confirmadas. A IA pergunta "o que mudou recentemente?".' },
               { tool: 'get_arch_rules()', tokens: '~300', desc: 'Regras de arquitetura do .tic-rules.json com status de compliance e violações atuais (architecture drift).' },
               { tool: 'get_arch_suggestions()', tokens: '~400', desc: 'Oportunidades de melhoria arquitetural (skill improve-codebase-architecture): módulos pass-through (deletion test), acoplamento alto, god modules e circulares — com sugestão de padrão.' },
               { tool: 'get_risk_prediction()', tokens: '~300', desc: 'Manutenção preditiva: onde o próximo bug tende a nascer (churn git × complexidade × acoplamento), com score 0–100 e motivos.' },
@@ -926,7 +936,9 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
               { file: 'risk-prediction.json', tokens: 'JSON', desc: 'Predição de risco por arquivo (churn × complexidade × acoplamento), com score e motivos.' },
               { file: 'pr-history.json', tokens: 'JSON', desc: 'Histórico de PR reviews (blast radius, riscos novos, gates) — alimenta o Recent PRs da aba Governança.' },
               { file: 'zoom-out.md', tokens: '~500', desc: 'Visão executiva: diagrama Mermaid das fronteiras de domínio (camadas e módulos), sem nomes de arquivo.' },
-              { file: 'tic-rules.example.json', tokens: 'JSON', desc: 'Exemplo de regras de arquitetura — copie para a raiz do projeto como .tic-rules.json e ajuste.' },
+              { file: 'tic-rules.example.json', tokens: 'JSON', desc: 'Exemplo de regras de arquitetura + alertas — copie para a raiz como .tic-rules.json e ajuste.' },
+              { file: 'activity.json', tokens: 'JSON', desc: 'Linha do tempo de atividade (sistema vivo): eventos do que mudou a cada análise. Alimenta a aba Atividade e o push SSE.' },
+              { file: 'prediction-accuracy.json', tokens: 'JSON', desc: 'Taxa de acerto acumulada do loop preditivo (quantas predições de risco viraram bug de fato).' },
               { file: 'metrics-summary.md', tokens: '~2k', desc: 'Resumo de qualidade: top hotspots, complexidade por módulo, debt score e violações arquiteturais.' },
               { file: 'patterns.md', tokens: '~1k', desc: 'Padrões arquiteturais detectados em todo o projeto (Repository, Service, Controller, Factory, DTO...).' },
               { file: 'inheritance.md', tokens: '~1k', desc: 'Hierarquia de classes: extends/implements, profundidade máxima de herança.' },
@@ -1040,6 +1052,7 @@ export function App() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [mcpRunning, setMcpRunning] = useState(false);
   const [mcpPort] = useState(7432);
+  const [liveMode, setLiveMode] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
 
@@ -1080,6 +1093,22 @@ export function App() {
     await window.ticAnalyzer.runAnalysis(projectPath);
   }, [projectPath]);
 
+  const toggleLive = useCallback(async () => {
+    const next = !liveMode;
+    const r = await window.ticAnalyzer.setLiveMode(projectPath, next);
+    setLiveMode(r.ok && r.live);
+  }, [liveMode, projectPath]);
+
+  // Modo Ao Vivo: quando o main re-analisa sozinho, atualiza o resultado na UI
+  useEffect(() => {
+    const off = window.ticAnalyzer.onActivity((e) => {
+      if (e.type === 'analysis') {
+        window.ticAnalyzer.getActivity(projectPath, 1); // toca o canal; dashboards recarregam via onActivity
+      }
+    });
+    return off;
+  }, [projectPath]);
+
   const handleToggleMcp = useCallback(async () => {
     if (mcpRunning) { await window.ticAnalyzer.stopMcp(); setMcpRunning(false); }
     else { await window.ticAnalyzer.startMcp(projectPath || '', mcpPort); setMcpRunning(true); }
@@ -1093,6 +1122,7 @@ export function App() {
     { id: 'overview', label: 'Visão Geral' },
     { id: 'health', label: 'Saúde' },
     { id: 'governance', label: 'Governança' },
+    { id: 'activity', label: 'Atividade' },
     { id: 'explorer', label: 'Explorador' },
     { id: 'impact', label: 'Impacto' },
     { id: 'metrics', label: 'Métricas' },
@@ -1102,13 +1132,21 @@ export function App() {
 
   return (
     <div style={S.app}>
+      <style>{`@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
       {/* Header */}
       <div style={S.header}>
         <div>
           <div style={{ fontSize: '18px', fontWeight: 700, color: C.accent }}>TIC Analyzer</div>
           <div style={{ fontSize: '11px', color: C.muted }}>Motor local de análise — zero tokens de IA</div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        {state === 'done' && result && (
+          <button onClick={toggleLive} title="Re-analisa sozinho quando você salva um arquivo"
+            style={{ ...S.tab(liveMode), borderColor: liveMode ? C.red : C.border, color: liveMode ? '#fff' : C.muted, background: liveMode ? C.red : 'transparent', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: liveMode ? '#fff' : C.muted, animation: liveMode ? 'pulse 1.5s infinite' : 'none' }} />
+            {liveMode ? 'Ao Vivo' : 'Ao Vivo'}
+          </button>
+        )}
+        <div style={{ marginLeft: state === 'done' && result ? '0' : 'auto', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {state === 'done' && result && TABS.filter((t) => t.id !== 'docs').map((t) => (
             <button key={t.id} style={S.tab(activeTab === t.id)} onClick={() => setActiveTab(t.id)}>{t.label}</button>
           ))}
@@ -1228,7 +1266,7 @@ export function App() {
                         {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
                       </div>
                       <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_arch_rules','get_arch_suggestions','get_risk_prediction','get_agent_brief','get_diagnosis','get_zoom_out','get_out_of_scope','list_triage','update_triage','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
+                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_arch_rules','get_arch_suggestions','get_risk_prediction','get_agent_brief','get_diagnosis','get_zoom_out','get_out_of_scope','list_triage','update_triage','get_activity','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
                       </div>
@@ -1251,6 +1289,10 @@ export function App() {
 
             {activeTab === 'governance' && (
               <div style={S.card}><GovernanceDashboard ticCodeDir={result.outputPath} projectPath={projectPath} /></div>
+            )}
+
+            {activeTab === 'activity' && (
+              <div style={S.card}><ActivityFeed ticCodeDir={result.outputPath} projectPath={projectPath} /></div>
             )}
 
             {activeTab === 'explorer' && (

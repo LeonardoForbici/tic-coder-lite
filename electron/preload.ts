@@ -49,6 +49,18 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   openArchReport: (projectPath: string): Promise<unknown> =>
     ipcRenderer.invoke('open-arch-report', projectPath),
 
+  setLiveMode: (projectPath: string, on: boolean): Promise<unknown> =>
+    ipcRenderer.invoke('set-live-mode', projectPath, on),
+
+  getActivity: (projectPath: string, limit?: number): Promise<unknown> =>
+    ipcRenderer.invoke('get-activity', projectPath, limit),
+
+  onActivity: (callback: (event: unknown) => void) => {
+    const handler = (_event: unknown, e: unknown) => callback(e);
+    ipcRenderer.on('activity-event', handler);
+    return () => ipcRenderer.removeListener('activity-event', handler);
+  },
+
   getTokenStats: (): Promise<unknown> =>
     ipcRenderer.invoke('get-token-stats'),
 

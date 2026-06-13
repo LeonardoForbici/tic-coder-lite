@@ -15,6 +15,7 @@ import { queryImpactOf, queryBlastRadius, type ImpactOfResult, type BlastRadiusR
 import { queryGraphLevel } from '../analyzer/store/graphQueries';
 import { buildAgentBrief, buildDiagnosis } from './agentBrief';
 import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
+import { loadActivity } from '../analyzer/store/activityLog';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
@@ -53,6 +54,7 @@ function estimateTokens(text: string): number {
 
 export class TicAnalyzerMcpServer {
   private httpServer?: http.Server;
+  private sseClients = new Set<http.ServerResponse>();
   private projectPath: string;
   private ticCodePath: string;
   private tokenLog: TokenEntry[] = [];
@@ -296,6 +298,11 @@ export class TicAnalyzerMcpServer {
             },
             required: ['id']
           }
+        },
+        {
+          name: 'get_activity',
+          description: 'Linha do tempo de atividade do projeto (sistema vivo): o que mudou nas últimas análises — health subiu/caiu, riscos novos, violações de regra, predições confirmadas. Use para "o que mudou recentemente?". ~300 tokens.',
+          inputSchema: { type: 'object', properties: { limit: { type: 'number', description: 'Quantos eventos recentes (default 20).' } } }
         },
         {
           name: 'get_health',
@@ -825,6 +832,19 @@ export class TicAnalyzerMcpServer {
           });
           if (!r.ok) return respond(textResult(`❌ ${r.error}`));
           return respond(textResult(`✅ Item \`${id}\` atualizado: estado=${r.item!.state}, categoria=${r.item!.category}, prioridade=${r.item!.priority}`));
+        }
+
+        case 'get_activity': {
+          const limit = (args as { limit?: number } | undefined)?.limit ?? 20;
+          const events = loadActivity(this.ticCodePath, limit);
+          if (events.length === 0) return respond(textResult('Nenhuma atividade registrada ainda. Rode uma análise.'));
+          const icon = (s: string) => (s === 'critical' ? '🔴' : s === 'warn' ? '🟠' : 'ℹ️');
+          const lines = [
+            `# Atividade recente (${events.length} evento(s))`,
+            '',
+            ...[...events].reverse().map((e) => `- ${icon(e.severity)} \`${new Date(e.ts).toLocaleString('pt-BR')}\` **${e.title}**${e.detail ? ` — ${e.detail}` : ''}`)
+          ];
+          return respond(textResult(lines.join('\n')));
         }
 
         case 'get_health': {
@@ -1954,16 +1974,32 @@ export class TicAnalyzerMcpServer {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, Authorization');
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       if (authToken && req.url !== '/health') {
+        // EventSource não envia headers → /events aceita ?token= na query
+        const url = new URL(req.url ?? '/', 'http://localhost');
+        const queryToken = url.searchParams.get('token');
         const auth = req.headers.authorization ?? '';
-        if (auth !== `Bearer ${authToken}`) {
+        if (auth !== `Bearer ${authToken}` && queryToken !== authToken) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'unauthorized: use Authorization: Bearer <token>' }));
+          res.end(JSON.stringify({ error: 'unauthorized: use Authorization: Bearer <token> (ou ?token= para /events)' }));
           return;
         }
       }
       if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok', projectPath: this.projectPath, version: '2.0.0' }));
+        return;
+      }
+      // ── SSE: push ao vivo (analysis-complete + eventos de atividade) ──────────
+      if (req.url === '/events' || req.url?.startsWith('/events')) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive'
+        });
+        res.write('retry: 5000\n\n');
+        this.sseClients.add(res);
+        const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* fechado */ } }, 25_000);
+        req.on('close', () => { clearInterval(ping); this.sseClients.delete(res); });
         return;
       }
       if (req.url === '/mcp' || req.url?.startsWith('/mcp')) {
@@ -2009,6 +2045,18 @@ export class TicAnalyzerMcpServer {
 
   isRunning(): boolean {
     return this.httpServer?.listening ?? false;
+  }
+
+  /** Push de um evento para todos os clientes SSE conectados em /events. */
+  emit(event: unknown): void {
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    for (const res of this.sseClients) {
+      try { res.write(payload); } catch { this.sseClients.delete(res); }
+    }
+  }
+
+  sseClientCount(): number {
+    return this.sseClients.size;
   }
 }
 
