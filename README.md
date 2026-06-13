@@ -40,7 +40,7 @@ A ideia central: o trabalho pesado (AST, grafos, impacto, métricas, regras) é 
 ### 1. App desktop (dev individual)
 
 1. Abrir o TIC Analyzer → selecionar a pasta raiz do projeto → **Analisar**
-2. Explorar as abas: **Visão Geral · Saúde · Governança · Explorador · Impacto · Métricas · Arquivos**
+2. Explorar as abas: **Visão Geral · Saúde · Valor · Governança · Atividade · Explorador · Impacto · Métricas · Arquivos**
 3. (Opcional) **Iniciar MCP** e configurar no `.claude/settings.json` do projeto analisado:
 
 ```json
@@ -133,6 +133,20 @@ Regras por **camada** (frontend/backend/database), **módulo** ou **glob de path
 
 Cruza o churn do git (90 dias) com as métricas estáticas: **score 0–100 por arquivo** = churn (40%) + commits de fix (20%) + complexidade (20%) + acoplamento (20%), com motivos legíveis ("mudou 14× em 90 dias, 8 fixes, complexidade 32"). Arquivos de alto risco tocados num PR ganham flag no comentário.
 
+### Valor & Custo (ROI) — o argumento que reduz tempo e dinheiro
+
+Traduz a análise técnica em **tempo e dinheiro** para a liderança (aba **Valor**):
+- **Custo da dívida**: débito técnico → horas → dev-days → moeda (`debtScore × hoursPerDebtPoint × hourlyRate`). Taxa-hora e moeda configuráveis em `.tic-rules.json` → `roi`.
+- **Horas economizadas**: cada entidade cross-tier que um PR impactou e que não precisou ser rastreada à mão (estimativa conservadora) → horas/custo poupados.
+- **Ownership & bus-factor** (autoria git): quem domina cada módulo, **conhecimento em risco** (arquivo crítico com 1 só autor — se a pessoa sair, dói), dificuldade de **onboarding** por módulo e **roteamento de revisor** de PR.
+- **Relatório Executivo**: um clique gera um **PDF** (ou HTML) para a diretoria — saúde, tendência, custo da dívida, riscos e risco de conhecimento, em vocabulário de negócio.
+
+```json
+"roi": { "hourlyRate": 50, "currency": "US$", "hoursPerDebtPoint": 0.5 }
+```
+
+> Valores de tempo/custo são **estimativas transparentes** ancoradas no débito e na taxa-hora — não promessa contábil.
+
 ### Skills de engenharia (fiéis a [mattpocock/skills](https://github.com/mattpocock/skills))
 
 | Skill | Implementação no TIC |
@@ -178,6 +192,7 @@ tic-analyzer health <path>
 tic-analyzer pr-review --base <dir> --head <dir> [--out report.md]
            [--gate new-high-risks,new-rule-violations,health-drop:5] [--brief-out brief.md]
 tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>] [--watch <min>] [--debounce <seg>]
+tic-analyzer report <path> [--out report.html]                                          # relatório executivo (HTML)
 ```
 
 Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro. Cada execução registra em `.tic-code/pr-history.json` (alimenta o dashboard).
@@ -203,7 +218,7 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 
 ---
 
-## As 46 ferramentas MCP
+## As 49 ferramentas MCP
 
 **Impacto (use primeiro):** `get_blast_radius` (resumo ~200 tokens — **comece por ele**) · `get_impact_of` · `get_table_impact` · `get_diff_impact` · `get_impact`
 
@@ -212,6 +227,8 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 **Navegação e fluxo:** `trace_flow` · `find_path` · `get_graph_level` · `search_code` · `get_concept_map`
 
 **Contexto:** `get_quick_context` · `list_modules` · `get_module(detail)` · `search_module` · `get_multigraph(detail)` · `get_diagram`
+
+**Valor & custo:** `get_roi` · `get_ownership` · `suggest_reviewers`
 
 **Qualidade e saúde:** `get_health` · `get_activity` (timeline do sistema vivo) · `get_metrics` · `get_hotspots` · `get_violations` · `get_patterns` · `get_inheritance` · `get_dead_components`
 
@@ -283,7 +300,7 @@ src/
       snapshots            histórico de health
       triageStore          fila de triagem (máquina de estados da skill)
   cli/               headless: analyze / health / pr-review / serve
-  mcp/               MCP Server HTTP/SSE (46 tools, auth Bearer, push SSE /events, agent briefs)
+  mcp/               MCP Server HTTP/SSE (49 tools, auth Bearer, push SSE /events, agent briefs)
   ui/                React: Health, Governança, Explorador, Impacto
 action.yml           GitHub Action (PR review, cache incremental, issues de triagem)
 ```

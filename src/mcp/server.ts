@@ -16,6 +16,7 @@ import { queryGraphLevel } from '../analyzer/store/graphQueries';
 import { buildAgentBrief, buildDiagnosis } from './agentBrief';
 import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
 import { loadActivity } from '../analyzer/store/activityLog';
+import { suggestReviewers } from '../analyzer/computeOwnership';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
@@ -298,6 +299,21 @@ export class TicAnalyzerMcpServer {
             },
             required: ['id']
           }
+        },
+        {
+          name: 'get_roi',
+          description: 'ROI: custo da dívida técnica em tempo e dinheiro (dev-days + moeda), horas/custo economizados pelos PRs, e top módulos por custo. O argumento de tempo&custo para liderança. ~250 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_ownership',
+          description: 'Ownership e bus-factor: quem domina cada módulo, % de cobertura, arquivos de conhecimento em risco (1 só autor + alto impacto) e dificuldade de onboarding por módulo. Sem entity = visão geral; com entity = dono do arquivo/módulo. ~300 tokens.',
+          inputSchema: { type: 'object', properties: { entity: { type: 'string', description: 'Arquivo ou módulo (opcional).' } } }
+        },
+        {
+          name: 'suggest_reviewers',
+          description: 'Roteamento de revisor: dado um conjunto de arquivos mudados, sugere quem deve revisar (dono provável por autoria git). ~150 tokens.',
+          inputSchema: { type: 'object', properties: { files: { type: 'array', items: { type: 'string' }, description: 'Caminhos relativos dos arquivos mudados.' } }, required: ['files'] }
         },
         {
           name: 'get_activity',
@@ -832,6 +848,64 @@ export class TicAnalyzerMcpServer {
           });
           if (!r.ok) return respond(textResult(`❌ ${r.error}`));
           return respond(textResult(`✅ Item \`${id}\` atualizado: estado=${r.item!.state}, categoria=${r.item!.category}, prioridade=${r.item!.priority}`));
+        }
+
+        case 'get_roi': {
+          const roi = this.readJson('roi.json');
+          if (!roi) return respond(textResult('roi.json não encontrado. Execute a análise novamente.'));
+          const m = (n: number) => `${roi.currency} ${n.toLocaleString()}`;
+          const lines = [
+            '# ROI — tempo & custo',
+            '',
+            `- **Dívida técnica:** ${roi.devDays} dev-days para sanear (${m(roi.debtCost)} · ${roi.remediationHours}h @ ${m(roi.hourlyRate)}/h)`,
+            `- **Economizado pelos PRs:** ${roi.hoursSaved}h (${m(roi.savedCost)}) em investigação de impacto evitada`,
+            `- **Saldo:** ${m(roi.net)} ${roi.net >= 0 ? '(a ferramenta já se pagou)' : ''}`,
+            '',
+            '## Custo da dívida por módulo',
+            ...(roi.byModule ?? []).slice(0, 10).map((x: any) => `- ${x.module}: ${m(x.cost)} (${x.hours}h)`),
+            '',
+            '> Estimativas ancoradas no débito técnico e na taxa-hora configurada (.tic-rules.json → roi).'
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_ownership': {
+          const own = this.readJson('ownership.json');
+          if (!own) return respond(textResult('ownership.json não encontrado (projeto sem git ou análise desatualizada).'));
+          const entity = (args as { entity?: string } | undefined)?.entity;
+          if (entity) {
+            const fileOwner = own.fileOwner ?? {};
+            const exact = fileOwner[entity];
+            const mod = (own.modules ?? []).find((m: any) => m.module === entity);
+            if (mod) return respond(textResult(`Módulo **${mod.module}**: dono **${mod.primaryOwner}** (${mod.ownershipPct}%), ${mod.authorCount} autor(es), bus-factor ${mod.busFactor}, onboarding ~${mod.onboardingHours}h (${mod.difficulty}).`));
+            if (exact) return respond(textResult(`\`${entity}\` — dono provável: **${exact}**.`));
+            const partial = Object.keys(fileOwner).find((f) => f.endsWith(entity));
+            return respond(textResult(partial ? `\`${partial}\` — dono provável: **${fileOwner[partial]}**.` : `Sem dados de ownership para "${entity}".`));
+          }
+          const lines = [
+            '# Ownership & bus-factor',
+            '',
+            '## Onboarding por módulo (mais difícil primeiro)',
+            ...(own.modules ?? []).slice(0, 10).map((m: any) => `- **${m.module}** — dono ${m.primaryOwner} (${m.ownershipPct}%), bus-factor ${m.busFactor}, ~${m.onboardingHours}h (${m.difficulty})`),
+            '',
+            '## 🧠 Conhecimento em risco (1 só autor + alto impacto)',
+            ...(own.knowledgeRisk ?? []).slice(0, 10).map((k: any) => `- \`${k.file}\` — só **${k.author}** (${k.reason})`),
+            ...(own.startHere?.length ? ['', `**Comece por aqui (onboarding):** ${own.startHere.join(', ')}`] : [])
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'suggest_reviewers': {
+          const files = ((args as { files?: string[] }).files ?? []).filter((f) => typeof f === 'string');
+          const own = this.readJson('ownership.json');
+          if (!own?.fileOwner) return respond(textResult('Sem dados de ownership (projeto sem git ou análise desatualizada).'));
+          const out = suggestReviewers(own.fileOwner, files);
+          if (out.length === 0) return respond(textResult('Nenhum dono identificado para os arquivos informados.'));
+          return respond(textResult([
+            '# Revisores sugeridos',
+            '',
+            ...out.map((r) => `- **${r.author}** — ${r.files.length} arquivo(s): ${r.files.slice(0, 5).map((f) => `\`${f}\``).join(', ')}`)
+          ].join('\n')));
         }
 
         case 'get_activity': {

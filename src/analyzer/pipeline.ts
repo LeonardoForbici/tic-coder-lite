@@ -42,6 +42,8 @@ import { computeHealthScore } from './computeHealthScore';
 import { appendSnapshot, loadSnapshots } from './store/snapshots';
 import { loadArchRules, checkArchRules, buildFileInfoLookup, writeRulesExample, findDeepeningCandidates } from './checkArchRules';
 import { collectChurn, predictRisk, type RiskPrediction } from './computeRiskPrediction';
+import { collectAuthorship, computeOwnership } from './computeOwnership';
+import { computeRoi } from './computeRoi';
 import { appendEvents, makeEvent } from './store/activityLog';
 import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
 import { syncTriageItems, type TriageCandidate } from './store/triageStore';
@@ -92,6 +94,8 @@ export interface PipelineResult {
   /** Governança: violações de regra (.tic-rules.json) e predição de risco. */
   archViolations?: number;
   riskPredictions?: number;
+  roiDebtCost?: number;
+  roiHoursSaved?: number;
   triageItems?: number;
   activityEvents?: number;
   /** Duração (ms) por fase — para identificar gargalos em projetos grandes. */
@@ -130,6 +134,8 @@ const PHASES: PipelinePhase[] = [
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
   { id: 'arch-rules', label: 'Validando regras de arquitetura (.tic-rules.json)', status: 'pending' },
   { id: 'predict', label: 'Predição de risco (churn × acoplamento)', status: 'pending' },
+  { id: 'ownership', label: 'Mapeando ownership e bus-factor', status: 'pending' },
+  { id: 'roi', label: 'Calculando ROI (tempo & custo)', status: 'pending' },
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
   { id: 'db-schema', label: 'Detectando schema de banco de dados', status: 'pending' },
@@ -454,6 +460,28 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       ? `${riskPredictions.length} arquivos com risco preditivo mapeado`
       : 'sem histórico git — predição pulada');
 
+    // ── 17d. OWNERSHIP / BUS-FACTOR ──────────────────────────────────────────────
+    report('ownership', 82, 'Mapeando autoria, bus-factor e onboarding...');
+    const authorship = collectAuthorship(projectPath);
+    const ownership = authorship
+      ? computeOwnership(authorship, metrics.files, modules)
+      : { modules: [], knowledgeRisk: [], startHere: [], fileOwner: {} };
+    fs.writeFileSync(path.join(ticCodeDir, 'ownership.json'), JSON.stringify(ownership), 'utf8');
+    markDone('ownership');
+    report('ownership', 100, authorship
+      ? `${ownership.modules.length} módulos, ${ownership.knowledgeRisk.length} arquivo(s) de conhecimento em risco`
+      : 'sem histórico git — ownership pulado');
+
+    // ── 17e. ROI (débito → tempo & dinheiro) ─────────────────────────────────────
+    report('roi', 83, 'Convertendo débito técnico em tempo e custo...');
+    const prHistory = (() => {
+      try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, 'pr-history.json'), 'utf8')); } catch { return []; }
+    })();
+    const roi = computeRoi(metrics.files, modules, Array.isArray(prHistory) ? prHistory : [], rulesConfig?.roi);
+    fs.writeFileSync(path.join(ticCodeDir, 'roi.json'), JSON.stringify(roi), 'utf8');
+    markDone('roi');
+    report('roi', 100, `dívida ≈ ${roi.devDays} dev-days (${roi.currency} ${roi.debtCost.toLocaleString()})`);
+
     // ── 18. HERANÇA ───────────────────────────────────────────────────────────────
     report('inheritance', 84, 'Detectando hierarquia de classes...');
     const inheritanceTree = detectInheritance(files, graph.semanticClasses);
@@ -555,7 +583,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
         totalEdges: graph.edges.length,
         endpoints: endpoints.length,
         modules: modules.length,
-        impactEdges: impactEdges.length
+        impactEdges: impactEdges.length,
+        remediationHours: roi.remediationHours,
+        debtCost: roi.debtCost
       }
     });
     markDone('health');
@@ -648,6 +678,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       dbSchema, impactIndex, quickContextTokens, health,
       archViolations: { items: archViolations, errorCount: archErrors, warnCount: archViolations.length - archErrors, ruleCount: rulesConfig?.rules.length ?? 0 },
       riskPrediction: riskPredictions.slice(0, 20),
+      roi,
+      ownership: { modules: ownership.modules, knowledgeRisk: ownership.knowledgeRisk, startHere: ownership.startHere },
       transactionBoundaries, batchJobs, angularModules, ngrxItems, deadComponents
     });
     markDone('export-json');
@@ -694,6 +726,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       healthGrade: health.grade,
       archViolations: archViolations.length,
       riskPredictions: riskPredictions.length,
+      roiDebtCost: roi.debtCost,
+      roiHoursSaved: roi.hoursSaved,
       triageItems: triageStats.total,
       activityEvents: allEvents.length,
       phaseTimings

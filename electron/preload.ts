@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   getActivity: (projectPath: string, limit?: number): Promise<unknown> =>
     ipcRenderer.invoke('get-activity', projectPath, limit),
 
+  exportExecutiveReport: (projectPath: string, format: 'pdf' | 'html'): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('export-executive-report', projectPath, format),
+
   onActivity: (callback: (event: unknown) => void) => {
     const handler = (_event: unknown, e: unknown) => callback(e);
     ipcRenderer.on('activity-event', handler);

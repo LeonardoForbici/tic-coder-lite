@@ -22,6 +22,7 @@ import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { loadActivity } from '../analyzer/store/activityLog';
 import { loadArchRules } from '../analyzer/checkArchRules';
 import { dispatchAlerts } from '../analyzer/notify';
+import { renderExecutiveHtml, buildExecReportData } from '../analyzer/generateExecutiveReport';
 
 interface Args {
   positional: string[];
@@ -56,7 +57,8 @@ function usage(): never {
                [--no-analyze] [--watch <minutos>] [--debounce <seg>]   MCP server vivo (máquina dedicada).
                --host 0.0.0.0 expõe na rede — USE --token (ou TIC_TOKEN).
                File-watch reativo + push SSE em /events + alertas (.tic-rules.json → alerts).
-               --debounce N (default 15s) espera N s após o último save; --watch N = rede de segurança periódica`);
+               --debounce N (default 15s) espera N s após o último save; --watch N = rede de segurança periódica
+  tic-analyzer report <path> [--out report.html]          Relatório executivo (HTML) para liderança`);
   process.exit(2);
 }
 
@@ -261,6 +263,23 @@ async function cmdServe(args: Args): Promise<number> {
   return 0;
 }
 
+/** Relatório executivo em HTML (headless/CI). PDF só no app (precisa do Electron). */
+function cmdReport(args: Args): number {
+  const target = args.positional[0];
+  if (!target) usage();
+  const ticCodeDir = path.join(path.resolve(target), '.tic-code');
+  if (!fs.existsSync(path.join(ticCodeDir, 'analysis.json'))) {
+    console.error('Análise não encontrada. Rode `tic-analyzer analyze` primeiro.');
+    return 2;
+  }
+  const read = (f: string) => { try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, f), 'utf8')); } catch { return null; } };
+  const html = renderExecutiveHtml(buildExecReportData(read));
+  const out = typeof args.flags.get('out') === 'string' ? path.resolve(args.flags.get('out') as string) : path.join(ticCodeDir, 'executive-report.html');
+  fs.writeFileSync(out, html, 'utf8');
+  console.error(`Relatório executivo (HTML) escrito em ${out}`);
+  return 0;
+}
+
 (async () => {
   const [command, ...rest] = process.argv.slice(2);
   const args = parseArgs(rest);
@@ -269,6 +288,7 @@ async function cmdServe(args: Args): Promise<number> {
     case 'health': process.exit(cmdHealth(args));
     case 'pr-review': process.exit(await cmdPrReview(args));
     case 'serve': process.exit(await cmdServe(args));
+    case 'report': process.exit(cmdReport(args));
     default: usage();
   }
 })().catch((err) => {

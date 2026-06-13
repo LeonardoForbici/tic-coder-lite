@@ -10,6 +10,7 @@ import { transitionTriageItem, createManualItem, type TriageState, type TriageCa
 import { renderArchReviewHtml, loadArchRules } from '../src/analyzer/checkArchRules';
 import { loadActivity } from '../src/analyzer/store/activityLog';
 import { dispatchAlerts } from '../src/analyzer/notify';
+import { renderExecutiveHtml, buildExecReportData } from '../src/analyzer/generateExecutiveReport';
 
 const isDev = !app.isPackaged;
 
@@ -120,6 +121,38 @@ ipcMain.handle('set-live-mode', async (_event, projectPath: string, on: boolean)
 
 ipcMain.handle('get-activity', async (_event, projectPath: string, limit?: number) => {
   return loadActivity(path.join(projectPath, '.tic-code'), limit);
+});
+
+// Relatório executivo: HTML → PDF via printToPDF (Electron nativo) ou HTML standalone
+ipcMain.handle('export-executive-report', async (_event, projectPath: string, format: 'pdf' | 'html' = 'pdf') => {
+  const fs = await import('fs');
+  const ticCodeDir = path.join(projectPath, '.tic-code');
+  const read = (f: string) => { try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, f), 'utf8')); } catch { return null; } };
+  if (!read('analysis.json')) return { ok: false, error: 'Análise não encontrada — rode Analisar primeiro.' };
+  const html = renderExecutiveHtml(buildExecReportData(read));
+
+  if (format === 'html') {
+    const out = path.join(ticCodeDir, 'executive-report.html');
+    fs.writeFileSync(out, html, 'utf8');
+    await shell.openPath(out);
+    return { ok: true, path: out };
+  }
+
+  // PDF: renderiza num BrowserWindow oculto e usa webContents.printToPDF
+  const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
+  try {
+    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    await new Promise((r) => setTimeout(r, 600)); // deixa o Tailwind CDN aplicar
+    const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+    const out = path.join(ticCodeDir, 'executive-report.pdf');
+    fs.writeFileSync(out, pdf);
+    await shell.openPath(out);
+    return { ok: true, path: out };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  } finally {
+    win.destroy();
+  }
 });
 
 ipcMain.handle('start-mcp', async (_event, projectPath: string, port: number) => {
