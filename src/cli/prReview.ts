@@ -11,6 +11,7 @@ import * as path from 'path';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { queryBlastRadius } from '../analyzer/store/impactQueries';
 import { loadSnapshots } from '../analyzer/store/snapshots';
+import { suggestReviewers } from '../analyzer/computeOwnership';
 
 export const REPORT_MARKER = '<!-- tic-analyzer-report -->';
 
@@ -38,6 +39,8 @@ export interface PrReviewResult {
   grilling: string[];
   /** Mudança atinge o limiar de ADR da skill (blast alto + cruza camadas). */
   adrSuggested: boolean;
+  /** Revisor(es) sugerido(s) por ownership dos arquivos mudados. */
+  reviewers: Array<{ author: string; files: string[] }>;
 }
 
 export interface GateResult {
@@ -159,6 +162,13 @@ export function compareAnalyses(baseDir: string, headDir: string, changedFiles: 
   // (proxy: blast radius alto E atravessa camadas)
   const adrSuggested = impacts.some((i) => i.totalAffected >= 20) && crossTierHits.length > 0;
 
+  // Revisor sugerido por ownership (autoria git) dos arquivos mudados
+  let reviewers: PrReviewResult['reviewers'] = [];
+  try {
+    const own = JSON.parse(fs.readFileSync(path.join(headDir, '.tic-code', 'ownership.json'), 'utf8'));
+    if (own?.fileOwner) reviewers = suggestReviewers(own.fileOwner, changedFiles).slice(0, 3);
+  } catch { /* sem ownership */ }
+
   return {
     changedFiles,
     newRisks,
@@ -171,7 +181,8 @@ export function compareAnalyses(baseDir: string, headDir: string, changedFiles: 
     totalImpacted: impacts.reduce((s, i) => s + i.totalAffected, 0),
     riskFlags,
     grilling: grilling.slice(0, 5),
-    adrSuggested
+    adrSuggested,
+    reviewers
   };
 }
 
@@ -325,6 +336,10 @@ export function formatPrComment(result: PrReviewResult, gate?: GateResult): stri
       lines.push('', '> 📐 Esta mudança atinge o limiar de ADR (difícil de reverter + cruza camadas + trade-off real) — considere registrar a decisão em `docs/adr/`.');
     }
     lines.push('', '</details>', '');
+  }
+
+  if (result.reviewers.length > 0) {
+    lines.push(`👤 **Revisor sugerido:** ${result.reviewers.map((r) => `${r.author} (${r.files.length})`).join(' · ')}`, '');
   }
 
   lines.push('---');

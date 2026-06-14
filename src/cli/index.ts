@@ -19,6 +19,11 @@ import { compareAnalyses, evaluateGates, formatPrComment, appendPrHistory } from
 import { TicAnalyzerMcpServer } from '../mcp/server';
 import { buildAgentBrief } from '../mcp/agentBrief';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
+import { loadActivity } from '../analyzer/store/activityLog';
+import { loadArchRules } from '../analyzer/checkArchRules';
+import { dispatchAlerts } from '../analyzer/notify';
+import { renderExecutiveHtml, buildExecReportData } from '../analyzer/generateExecutiveReport';
+import { upsertProject, loadPortfolio } from '../analyzer/store/portfolioStore';
 
 interface Args {
   positional: string[];
@@ -50,9 +55,12 @@ function usage(): never {
                [--out report.md] [--gate new-high-risks,new-violations,health-drop:5]
                [--changed arquivo1,arquivo2 | --base-ref <ref>]
   tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>]
-               [--no-analyze] [--watch <minutos>]          MCP server headless (máquina dedicada).
+               [--no-analyze] [--watch <minutos>] [--debounce <seg>]   MCP server vivo (máquina dedicada).
                --host 0.0.0.0 expõe na rede — USE --token (ou TIC_TOKEN).
-               --watch N re-analisa a cada N minutos (índice sempre fresco p/ o time)`);
+               File-watch reativo + push SSE em /events + alertas (.tic-rules.json → alerts).
+               --debounce N (default 15s) espera N s após o último save; --watch N = rede de segurança periódica
+  tic-analyzer report <path> [--out report.html]          Relatório executivo (HTML) para liderança
+  tic-analyzer portfolio [--json]                          Lista o portfólio (todos os projetos analisados)`);
   process.exit(2);
 }
 
@@ -86,7 +94,21 @@ async function cmdAnalyze(args: Args): Promise<number> {
   } else {
     console.error(`✗ Análise falhou: ${result.error}`);
   }
+  if (result.success) upsertProject(projectPath); // registra no portfólio global
   return result.success ? 0 : 2;
+}
+
+/** Lista o portfólio global (todos os projetos analisados). */
+function cmdPortfolio(args: Args): number {
+  const projects = loadPortfolio();
+  if (args.flags.has('json')) { console.log(JSON.stringify(projects, null, 2)); return 0; }
+  if (projects.length === 0) { console.log('Portfólio vazio. Rode `tic-analyzer analyze <path>` em um ou mais projetos.'); return 0; }
+  console.log(`\nPortfólio — ${projects.length} projeto(s) (pior saúde primeiro):\n`);
+  for (const p of projects) {
+    const cost = p.debtCost !== null ? ` · dívida ${p.currency} ${p.debtCost.toLocaleString()}` : '';
+    console.log(`  ${(p.healthScore ?? '—')}/100 ${p.healthGrade ?? ''}  ${p.name}  (${p.totalFiles.toLocaleString()} arq · ${p.risks.critical}🔴/${p.risks.high}🟠 · drift ${p.archErrors}${cost})`);
+  }
+  return 0;
 }
 
 function cmdHealth(args: Args): number {
@@ -188,12 +210,33 @@ async function cmdServe(args: Args): Promise<number> {
     return 2;
   }
 
+  const ticCodeDir = path.join(projectPath, '.tic-code');
+  const server = new TicAnalyzerMcpServer({ projectPath });
+
+  // Após cada análise: push SSE dos eventos novos + alertas outbound.
+  const broadcast = async (beforeCount: number) => {
+    const events = loadActivity(ticCodeDir);
+    const fresh = events.slice(beforeCount);
+    for (const e of fresh) server.emit(e);
+    server.emit({ type: 'analysis-complete', ts: new Date().toISOString() });
+    const cfg = loadArchRules(projectPath);
+    if (cfg?.alerts) {
+      const sent = await dispatchAlerts(fresh, cfg.alerts, path.basename(projectPath));
+      for (const s of sent) if (s.ok) console.error(`[alert] ${s.channel}: ${s.count} evento(s) enviado(s)`);
+    }
+  };
+
   const analyzeOnce = async (): Promise<boolean> => {
+    const before = loadActivity(ticCodeDir).length;
     const r = await runPipeline(projectPath, (p) => {
       if (p.percent === 100) process.stderr.write(`[analyze] ${p.phase}: ${p.detail}\n`);
     }, { skipAiFiles: args.flags.has('no-ai-files') });
-    if (r.success) console.error(`[analyze] ok — health ${r.healthScore}/100, ${r.totalFiles.toLocaleString()} arquivos`);
-    else console.error(`[analyze] falhou: ${r.error}`);
+    if (r.success) {
+      console.error(`[analyze] ok — health ${r.healthScore}/100, ${r.totalFiles.toLocaleString()} arquivos`);
+      await broadcast(before);
+    } else {
+      console.error(`[analyze] falhou: ${r.error}`);
+    }
     return r.success;
   };
 
@@ -201,16 +244,55 @@ async function cmdServe(args: Args): Promise<number> {
     if (!(await analyzeOnce())) return 2;
   }
 
-  const server = new TicAnalyzerMcpServer({ projectPath });
   await server.startHttp(port, host, token);
+
+  // ── File-watch reativo (olhos do sistema vivo): reage a SAVES, debounced ────
+  const debounceMs = Number(args.flags.get('debounce') ?? 15) * 1000;
+  const IGNORE = /(^|[\\/])(\.tic-code|\.git|node_modules|dist|build|target|out)([\\/]|$)/;
+  let timer: NodeJS.Timeout | null = null;
+  let analyzing = false;
+  const trigger = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (analyzing) { trigger(); return; }
+      analyzing = true;
+      void analyzeOnce().finally(() => { analyzing = false; });
+    }, debounceMs);
+  };
+  try {
+    fs.watch(projectPath, { recursive: true }, (_e, filename) => {
+      if (filename && !IGNORE.test(String(filename))) trigger();
+    });
+    console.error(`[watch] file-watch reativo ativo (debounce ${debounceMs / 1000}s) · SSE em /events`);
+  } catch {
+    // Plataforma/Node sem recursive: cai para o periódico abaixo
+    console.error('[watch] file-watch recursivo indisponível — usando apenas --watch periódico');
+  }
 
   const watchMin = Number(args.flags.get('watch') ?? 0);
   if (watchMin > 0) {
-    console.error(`[watch] re-análise incremental a cada ${watchMin} min`);
+    console.error(`[watch] rede de segurança: re-análise a cada ${watchMin} min`);
     setInterval(() => { void analyzeOnce(); }, watchMin * 60_000);
   }
 
   await new Promise(() => {}); // roda até ser interrompido (Ctrl+C / serviço)
+  return 0;
+}
+
+/** Relatório executivo em HTML (headless/CI). PDF só no app (precisa do Electron). */
+function cmdReport(args: Args): number {
+  const target = args.positional[0];
+  if (!target) usage();
+  const ticCodeDir = path.join(path.resolve(target), '.tic-code');
+  if (!fs.existsSync(path.join(ticCodeDir, 'analysis.json'))) {
+    console.error('Análise não encontrada. Rode `tic-analyzer analyze` primeiro.');
+    return 2;
+  }
+  const read = (f: string) => { try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, f), 'utf8')); } catch { return null; } };
+  const html = renderExecutiveHtml(buildExecReportData(read));
+  const out = typeof args.flags.get('out') === 'string' ? path.resolve(args.flags.get('out') as string) : path.join(ticCodeDir, 'executive-report.html');
+  fs.writeFileSync(out, html, 'utf8');
+  console.error(`Relatório executivo (HTML) escrito em ${out}`);
   return 0;
 }
 
@@ -222,6 +304,8 @@ async function cmdServe(args: Args): Promise<number> {
     case 'health': process.exit(cmdHealth(args));
     case 'pr-review': process.exit(await cmdPrReview(args));
     case 'serve': process.exit(await cmdServe(args));
+    case 'report': process.exit(cmdReport(args));
+    case 'portfolio': process.exit(cmdPortfolio(args));
     default: usage();
   }
 })().catch((err) => {

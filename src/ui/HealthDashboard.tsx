@@ -39,10 +39,14 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    window.ticAnalyzer.readFile(`${ticCodeDir}/snapshots.json`).then((content) => {
+    const load = () => window.ticAnalyzer.readFile(`${ticCodeDir}/snapshots.json`).then((content) => {
       if (!content) { setError('snapshots.json não encontrado — execute a análise novamente (versão atual gera o health score).'); return; }
-      try { setSnaps(JSON.parse(content)); } catch { setError('snapshots.json inválido.'); }
+      try { setSnaps(JSON.parse(content)); setError(''); } catch { setError('snapshots.json inválido.'); }
     });
+    load();
+    // Sistema vivo: recarrega quando uma nova análise conclui
+    const off = window.ticAnalyzer.onActivity?.((e: { type?: string }) => { if (e?.type === 'analysis') load(); });
+    return off;
   }, [ticCodeDir]);
 
   if (error) return <div style={{ padding: '30px', color: C.muted, fontSize: '13px' }}>{error}</div>;

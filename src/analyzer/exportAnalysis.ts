@@ -45,6 +45,10 @@ export interface ExportData {
   archViolations?: { items: unknown[]; errorCount: number; warnCount: number; ruleCount: number };
   /** Predição de risco (top 20). */
   riskPrediction?: unknown[];
+  /** ROI: débito em tempo/dinheiro. */
+  roi?: unknown;
+  /** Ownership, bus-factor, onboarding. */
+  ownership?: unknown;
 }
 
 export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
@@ -56,6 +60,8 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
     health: data.health,
     archViolations: data.archViolations,
     riskPrediction: data.riskPrediction,
+    roi: data.roi,
+    ownership: data.ownership,
     project: {
       name: data.projectName,
       totalFiles: data.files.length,

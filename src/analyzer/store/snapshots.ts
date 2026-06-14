@@ -32,6 +32,8 @@ export interface HealthSnapshot {
     endpoints: number;
     modules: number;
     impactEdges: number;
+    remediationHours?: number;
+    debtCost?: number;
   };
 }
 

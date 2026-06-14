@@ -39,9 +39,13 @@ import { buildSearchIndex } from './buildSearchIndex';
 import { writeIndexDb, INDEX_DB_FILE } from './store/indexDb';
 import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
 import { computeHealthScore } from './computeHealthScore';
-import { appendSnapshot } from './store/snapshots';
+import { appendSnapshot, loadSnapshots } from './store/snapshots';
 import { loadArchRules, checkArchRules, buildFileInfoLookup, writeRulesExample, findDeepeningCandidates } from './checkArchRules';
-import { collectChurn, predictRisk } from './computeRiskPrediction';
+import { collectChurn, predictRisk, type RiskPrediction } from './computeRiskPrediction';
+import { collectAuthorship, computeOwnership } from './computeOwnership';
+import { computeRoi } from './computeRoi';
+import { appendEvents, makeEvent } from './store/activityLog';
+import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
 import { syncTriageItems, type TriageCandidate } from './store/triageStore';
 import { generateZoomOut } from './generateZoomOut';
 
@@ -90,7 +94,12 @@ export interface PipelineResult {
   /** Governança: violações de regra (.tic-rules.json) e predição de risco. */
   archViolations?: number;
   riskPredictions?: number;
+  roiDebtCost?: number;
+  roiHoursSaved?: number;
+  /** Arquivos que reusaram símbolos do cache AST na re-análise incremental. */
+  astCacheHits?: number;
   triageItems?: number;
+  activityEvents?: number;
   /** Duração (ms) por fase — para identificar gargalos em projetos grandes. */
   phaseTimings?: Record<string, number>;
   error?: string;
@@ -127,6 +136,8 @@ const PHASES: PipelinePhase[] = [
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
   { id: 'arch-rules', label: 'Validando regras de arquitetura (.tic-rules.json)', status: 'pending' },
   { id: 'predict', label: 'Predição de risco (churn × acoplamento)', status: 'pending' },
+  { id: 'ownership', label: 'Mapeando ownership e bus-factor', status: 'pending' },
+  { id: 'roi', label: 'Calculando ROI (tempo & custo)', status: 'pending' },
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
   { id: 'db-schema', label: 'Detectando schema de banco de dados', status: 'pending' },
@@ -137,6 +148,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'health', label: 'Computando health score do projeto', status: 'pending' },
   { id: 'triage', label: 'Sincronizando fila de triagem', status: 'pending' },
   { id: 'zoom-out', label: 'Gerando visão executiva (zoom-out)', status: 'pending' },
+  { id: 'activity', label: 'Registrando atividade (delta + predição)', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
   { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
@@ -186,6 +198,16 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     // ── CACHE ─────────────────────────────────────────────────────────────────────
     const previousCache = loadFileCache(ticCodeDir);
 
+    // Estado ANTERIOR (lido antes de qualquer overwrite) — base do self-delta e
+    // do loop de aprendizado preditivo na fase 'activity'.
+    const readPrev = (file: string): any => {
+      try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, file), 'utf8')); } catch { return null; }
+    };
+    const previousAnalysis = readPrev('analysis.json');
+    const previousPrediction: RiskPrediction[] = Array.isArray(readPrev('risk-prediction.json')) ? readPrev('risk-prediction.json') : [];
+    const previousSnapshots = loadSnapshots(ticCodeDir);
+    const previousAccuracy = readPrev('prediction-accuracy.json');
+
     // ── 1. SCAN ──────────────────────────────────────────────────────────────────
     report('scan', 5, 'Iniciando scan...');
     const files = scanFiles(projectPath, {
@@ -207,7 +229,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── 3. GRAFO ─────────────────────────────────────────────────────────────────
     report('graph', 18, 'Construindo grafo de dependências (AST + símbolos)...');
-    const graph = await buildDependencyGraph(files, projectPath);
+    // Incremental: na re-análise, arquivos não alterados reusam os símbolos AST
+    // cacheados (pula o tree-sitter, a fase mais cara). 1ª análise = completa.
+    const graph = await buildDependencyGraph(files, projectPath, isIncremental ? { changedFiles } : {});
 
     // Telas .osw (JSON do frontend) → controller de código (kitAssembly.osw →
     // KitAssemblyController.tsx). Mescladas no grafo para fluírem ao impacto.
@@ -226,7 +250,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     fs.writeFileSync(path.join(ticCodeDir, 'dep-graph.json'), JSON.stringify({ nodes: graph.nodes.slice(0, 3000), edges: graph.edges.slice(0, 5000) }), 'utf8');
     markDone('graph');
     const resolvedEdges = graph.edges.filter((e) => e.confidence === 'resolved').length;
-    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas (${resolvedEdges.toLocaleString()} resolvidas)`);
+    const astNote = graph.astCacheHits ? ` · ${graph.astCacheHits.toLocaleString()} do cache AST` : '';
+    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas (${resolvedEdges.toLocaleString()} resolvidas)${astNote}`);
 
     // ── 4. RISCOS ────────────────────────────────────────────────────────────────
     report('risks', 26, 'Detectando riscos técnicos...');
@@ -440,6 +465,28 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       ? `${riskPredictions.length} arquivos com risco preditivo mapeado`
       : 'sem histórico git — predição pulada');
 
+    // ── 17d. OWNERSHIP / BUS-FACTOR ──────────────────────────────────────────────
+    report('ownership', 82, 'Mapeando autoria, bus-factor e onboarding...');
+    const authorship = collectAuthorship(projectPath);
+    const ownership = authorship
+      ? computeOwnership(authorship, metrics.files, modules)
+      : { modules: [], knowledgeRisk: [], startHere: [], fileOwner: {} };
+    fs.writeFileSync(path.join(ticCodeDir, 'ownership.json'), JSON.stringify(ownership), 'utf8');
+    markDone('ownership');
+    report('ownership', 100, authorship
+      ? `${ownership.modules.length} módulos, ${ownership.knowledgeRisk.length} arquivo(s) de conhecimento em risco`
+      : 'sem histórico git — ownership pulado');
+
+    // ── 17e. ROI (débito → tempo & dinheiro) ─────────────────────────────────────
+    report('roi', 83, 'Convertendo débito técnico em tempo e custo...');
+    const prHistory = (() => {
+      try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, 'pr-history.json'), 'utf8')); } catch { return []; }
+    })();
+    const roi = computeRoi(metrics.files, modules, Array.isArray(prHistory) ? prHistory : [], rulesConfig?.roi);
+    fs.writeFileSync(path.join(ticCodeDir, 'roi.json'), JSON.stringify(roi), 'utf8');
+    markDone('roi');
+    report('roi', 100, `dívida ≈ ${roi.devDays} dev-days (${roi.currency} ${roi.debtCost.toLocaleString()})`);
+
     // ── 18. HERANÇA ───────────────────────────────────────────────────────────────
     report('inheritance', 84, 'Detectando hierarquia de classes...');
     const inheritanceTree = detectInheritance(files, graph.semanticClasses);
@@ -541,7 +588,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
         totalEdges: graph.edges.length,
         endpoints: endpoints.length,
         modules: modules.length,
-        impactEdges: impactEdges.length
+        impactEdges: impactEdges.length,
+        remediationHours: roi.remediationHours,
+        debtCost: roi.debtCost
       }
     });
     markDone('health');
@@ -582,6 +631,31 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('zoom-out');
     report('zoom-out', 100, 'zoom-out.md gerado');
 
+    // ── 24d. ATIVIDADE (self-delta + loop preditivo) — o batimento do sistema ────
+    report('activity', 94, 'Computando o que mudou desde a última análise...');
+    const curDelta = {
+      snapshot: { score: health.score, counts: { risks: risks.length, violations: violations.length, modules: modules.length, hotspots: metrics.hotspotCount } },
+      analysis: {
+        risks: { items: risks.map((r) => ({ level: r.level, title: r.title, file: r.file })) },
+        archViolations: { items: archViolations.map((v) => ({ ruleId: v.ruleId, severity: v.severity, from: v.from, to: v.to })) },
+        modules: modules.map((m) => ({ name: m.name }))
+      }
+    };
+    const prevDelta = previousAnalysis && previousSnapshots.length > 0
+      ? { snapshot: { score: previousSnapshots[previousSnapshots.length - 1].score, counts: { risks: 0, violations: 0, modules: 0, hotspots: 0 } }, analysis: previousAnalysis }
+      : null;
+    const deltaEvents = computeSelfDelta(prevDelta, curDelta);
+    const newRiskFiles = new Set(deltaEvents.filter((e) => e.type === 'risk-new' && e.entity).map((e) => e.entity!.replace(/^file:/, '')));
+    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null);
+    fs.writeFileSync(path.join(ticCodeDir, 'prediction-accuracy.json'), JSON.stringify(accuracy), 'utf8');
+    const summary = makeEvent('analysis', 'info',
+      `Análise concluída — health ${health.score}/100 (${health.grade})`,
+      `${files.length.toLocaleString()} arquivos · ${deltaEvents.length} mudança(s) detectada(s)`);
+    const allEvents = [summary, ...deltaEvents, ...predEvents];
+    appendEvents(ticCodeDir, allEvents);
+    markDone('activity');
+    report('activity', 100, `${deltaEvents.length} mudança(s), ${predEvents.length} predição(ões) confirmada(s)`);
+
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');
     const searchEntries = buildSearchIndex(files, ticCodeDir);
@@ -609,6 +683,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       dbSchema, impactIndex, quickContextTokens, health,
       archViolations: { items: archViolations, errorCount: archErrors, warnCount: archViolations.length - archErrors, ruleCount: rulesConfig?.rules.length ?? 0 },
       riskPrediction: riskPredictions.slice(0, 20),
+      roi,
+      ownership: { modules: ownership.modules, knowledgeRisk: ownership.knowledgeRisk, startHere: ownership.startHere },
       transactionBoundaries, batchJobs, angularModules, ngrxItems, deadComponents
     });
     markDone('export-json');
@@ -655,7 +731,11 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       healthGrade: health.grade,
       archViolations: archViolations.length,
       riskPredictions: riskPredictions.length,
+      roiDebtCost: roi.debtCost,
+      roiHoursSaved: roi.hoursSaved,
+      astCacheHits: graph.astCacheHits ?? 0,
       triageItems: triageStats.total,
+      activityEvents: allEvents.length,
       phaseTimings
     };
 

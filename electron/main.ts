@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Notification } from 'electron';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { runPipeline, type PipelineProgress, type PipelineResult } from '../src/analyzer/pipeline';
@@ -7,7 +7,11 @@ import { openIndexDb, INDEX_DB_FILE } from '../src/analyzer/store/indexDb';
 import { queryImpactOf, queryBlastRadius } from '../src/analyzer/store/impactQueries';
 import { queryGraphLevel } from '../src/analyzer/store/graphQueries';
 import { transitionTriageItem, createManualItem, type TriageState, type TriageCategory, type TriagePriority } from '../src/analyzer/store/triageStore';
-import { renderArchReviewHtml } from '../src/analyzer/checkArchRules';
+import { renderArchReviewHtml, loadArchRules } from '../src/analyzer/checkArchRules';
+import { loadActivity } from '../src/analyzer/store/activityLog';
+import { dispatchAlerts } from '../src/analyzer/notify';
+import { renderExecutiveHtml, buildExecReportData } from '../src/analyzer/generateExecutiveReport';
+import { loadPortfolio, upsertProject, removeProject } from '../src/analyzer/store/portfolioStore';
 
 const isDev = !app.isPackaged;
 
@@ -55,15 +59,110 @@ ipcMain.handle('select-folder', async () => {
   return selected.endsWith('.tic-code') ? path.dirname(selected) : selected;
 });
 
-ipcMain.handle('run-analysis', async (_event, projectPath: string) => {
-  if (!mainWindow) return;
-
+async function runAndBroadcast(projectPath: string): Promise<PipelineResult> {
+  const ticCodeDir = path.join(projectPath, '.tic-code');
+  const before = loadActivity(ticCodeDir).length;
   const result = await runPipeline(projectPath, (progress: PipelineProgress) => {
     mainWindow?.webContents.send('analysis-progress', progress);
   });
+  mainWindow?.webContents.send('analysis-done', result);
+  if (result.success) upsertProject(projectPath); // registra/atualiza no portfólio global
 
-  mainWindow.webContents.send('analysis-done', result);
+  // Sistema vivo: empurra eventos novos ao renderer, notificação nativa p/
+  // críticos e alertas outbound (mesma config .tic-rules.json do servidor).
+  if (result.success) {
+    const fresh = loadActivity(ticCodeDir).slice(before);
+    for (const e of fresh) mainWindow?.webContents.send('activity-event', e);
+    const critical = fresh.filter((e) => e.severity === 'critical');
+    if (critical.length > 0 && Notification.isSupported()) {
+      new Notification({
+        title: `TIC Analyzer — ${path.basename(projectPath)}`,
+        body: critical.map((e) => e.title).slice(0, 3).join('\n')
+      }).show();
+    }
+    try {
+      const cfg = loadArchRules(projectPath);
+      if (cfg?.alerts) await dispatchAlerts(fresh, cfg.alerts, path.basename(projectPath));
+    } catch { /* best-effort */ }
+  }
   return result;
+}
+
+ipcMain.handle('run-analysis', async (_event, projectPath: string) => {
+  if (!mainWindow) return;
+  return runAndBroadcast(projectPath);
+});
+
+// ── Modo Ao Vivo: file-watch debounced no projeto aberto ─────────────────────
+let liveWatcher: import('fs').FSWatcher | null = null;
+let liveTimer: NodeJS.Timeout | null = null;
+let liveAnalyzing = false;
+ipcMain.handle('set-live-mode', async (_event, projectPath: string, on: boolean) => {
+  if (liveWatcher) { liveWatcher.close(); liveWatcher = null; }
+  if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+  if (!on) return { ok: true, live: false };
+  const fs = await import('fs');
+  const IGNORE = /(^|[\\/])(\.tic-code|\.git|node_modules|dist|build|target|out)([\\/]|$)/;
+  const trigger = () => {
+    if (liveTimer) clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => {
+      if (liveAnalyzing) { trigger(); return; }
+      liveAnalyzing = true;
+      void runAndBroadcast(projectPath).finally(() => { liveAnalyzing = false; });
+    }, 15_000);
+  };
+  try {
+    liveWatcher = fs.watch(projectPath, { recursive: true }, (_e, filename) => {
+      if (filename && !IGNORE.test(String(filename))) trigger();
+    });
+    return { ok: true, live: true };
+  } catch (err) {
+    return { ok: false, live: false, error: String(err) };
+  }
+});
+
+ipcMain.handle('get-activity', async (_event, projectPath: string, limit?: number) => {
+  return loadActivity(path.join(projectPath, '.tic-code'), limit);
+});
+
+// ── Portfólio multi-projeto ──────────────────────────────────────────────────
+ipcMain.handle('get-portfolio', async () => loadPortfolio());
+ipcMain.handle('remove-portfolio-project', async (_event, id: string) => { removeProject(id); return loadPortfolio(); });
+ipcMain.handle('analyze-portfolio-project', async (_event, projectPath: string) => {
+  const r = await runAndBroadcast(projectPath);
+  return { ok: r.success, portfolio: loadPortfolio() };
+});
+
+// Relatório executivo: HTML → PDF via printToPDF (Electron nativo) ou HTML standalone
+ipcMain.handle('export-executive-report', async (_event, projectPath: string, format: 'pdf' | 'html' = 'pdf') => {
+  const fs = await import('fs');
+  const ticCodeDir = path.join(projectPath, '.tic-code');
+  const read = (f: string) => { try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, f), 'utf8')); } catch { return null; } };
+  if (!read('analysis.json')) return { ok: false, error: 'Análise não encontrada — rode Analisar primeiro.' };
+  const html = renderExecutiveHtml(buildExecReportData(read));
+
+  if (format === 'html') {
+    const out = path.join(ticCodeDir, 'executive-report.html');
+    fs.writeFileSync(out, html, 'utf8');
+    await shell.openPath(out);
+    return { ok: true, path: out };
+  }
+
+  // PDF: renderiza num BrowserWindow oculto e usa webContents.printToPDF
+  const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
+  try {
+    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    await new Promise((r) => setTimeout(r, 600)); // deixa o Tailwind CDN aplicar
+    const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+    const out = path.join(ticCodeDir, 'executive-report.pdf');
+    fs.writeFileSync(out, pdf);
+    await shell.openPath(out);
+    return { ok: true, path: out };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  } finally {
+    win.destroy();
+  }
 });
 
 ipcMain.handle('start-mcp', async (_event, projectPath: string, port: number) => {

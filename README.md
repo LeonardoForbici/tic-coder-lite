@@ -40,7 +40,7 @@ A ideia central: o trabalho pesado (AST, grafos, impacto, métricas, regras) é 
 ### 1. App desktop (dev individual)
 
 1. Abrir o TIC Analyzer → selecionar a pasta raiz do projeto → **Analisar**
-2. Explorar as abas: **Visão Geral · Saúde · Governança · Explorador · Impacto · Métricas · Arquivos**
+2. Explorar as abas: **Visão Geral · Saúde · Valor · Governança · Atividade · Explorador · Impacto · Métricas · Arquivos · Portfólio**
 3. (Opcional) **Iniciar MCP** e configurar no `.claude/settings.json` do projeto analisado:
 
 ```json
@@ -56,8 +56,10 @@ tic-analyzer serve /caminho/do/projeto --host 0.0.0.0 --token segredo-do-time --
 ```
 
 - Analisa o projeto e sobe o MCP headless (sem janela)
-- `--watch 30` re-analisa **incrementalmente** a cada 30 min — índice sempre fresco
-- Em rede, `--token` (ou env `TIC_TOKEN`) é **obrigatório**: toda chamada exige `Authorization: Bearer <token>`; `/health` fica aberto para monitoramento
+- **File-watch reativo**: reage a *saves* (debounced, `--debounce 15`) e re-analisa sozinho — `--watch N` vira só rede de segurança periódica
+- **Push ao vivo** em `GET /events` (SSE): dashboards e assistentes de IA recebem `analysis-complete` + eventos de atividade sem polling
+- **Alertas outbound**: configure `alerts` no `.tic-rules.json` (Slack/webhook) — health caiu, risco crítico ou violação de regra disparam um POST na hora
+- Em rede, `--token` (ou env `TIC_TOKEN`) é **obrigatório**: `Authorization: Bearer <token>` (ou `?token=` no `/events`); `/health` fica aberto para monitoramento
 - Cada dev aponta o assistente de IA para a máquina dedicada — **todo o time consulta o MESMO índice**:
 
 ```json
@@ -116,15 +118,38 @@ O arquiteto declara o que não pode acontecer; a pipeline valida; o PR bloqueia 
   "outOfScope": [
     { "id": "multi-tenant", "decision": "Multi-tenancy fora do escopo atual",
       "reason": "Custo de migração não justifica", "date": "2026-01-15" }
-  ]
+  ],
+  "alerts": {
+    "slackWebhook": "https://hooks.slack.com/services/...",
+    "webhook": "https://meu-endpoint/tic",
+    "on": { "healthDrop": 5, "newCriticalRisk": true, "newRuleViolation": true }
+  }
 }
 ```
 
-Regras por **camada** (frontend/backend/database), **módulo** ou **glob de path**. Violações `error` derrubam o health score e o gate `new-rule-violations`. Sem o arquivo, a análise gera um exemplo em `.tic-code/tic-rules.example.json`. O catálogo `outOfScope` registra decisões para o time não rediscutir.
+Regras por **camada** (frontend/backend/database), **módulo** ou **glob de path**. Violações `error` derrubam o health score e o gate `new-rule-violations`. Sem o arquivo, a análise gera um exemplo em `.tic-code/tic-rules.example.json`. O catálogo `outOfScope` registra decisões para o time não rediscutir. A seção `alerts` (opcional) dispara notificações outbound — ver "Sistema vivo".
 
 ### Manutenção preditiva
 
 Cruza o churn do git (90 dias) com as métricas estáticas: **score 0–100 por arquivo** = churn (40%) + commits de fix (20%) + complexidade (20%) + acoplamento (20%), com motivos legíveis ("mudou 14× em 90 dias, 8 fixes, complexidade 32"). Arquivos de alto risco tocados num PR ganham flag no comentário.
+
+### Valor & Custo (ROI) — o argumento que reduz tempo e dinheiro
+
+Traduz a análise técnica em **tempo e dinheiro** para a liderança (aba **Valor**):
+- **Custo da dívida**: débito técnico → horas → dev-days → moeda (`debtScore × hoursPerDebtPoint × hourlyRate`). Taxa-hora e moeda configuráveis em `.tic-rules.json` → `roi`.
+- **Horas economizadas**: cada entidade cross-tier que um PR impactou e que não precisou ser rastreada à mão (estimativa conservadora) → horas/custo poupados.
+- **Ownership & bus-factor** (autoria git): quem domina cada módulo, **conhecimento em risco** (arquivo crítico com 1 só autor — se a pessoa sair, dói), dificuldade de **onboarding** por módulo e **roteamento de revisor** de PR.
+- **Relatório Executivo**: um clique gera um **PDF** (ou HTML) para a diretoria — saúde, tendência, custo da dívida, riscos e risco de conhecimento, em vocabulário de negócio.
+
+```json
+"roi": { "hourlyRate": 50, "currency": "US$", "hoursPerDebtPoint": 0.5 }
+```
+
+> Valores de tempo/custo são **estimativas transparentes** ancoradas no débito e na taxa-hora — não promessa contábil.
+
+### Portfólio multi-projeto
+
+Visão executiva **cross-repositório** (aba **Portfólio**): um registro global (`~/.tic-analyzer/portfolio.json`, ou `TIC_PORTFOLIO_DIR`) que cada análise — pelo app, CLI ou Action em CI — alimenta com um resumo compacto. O painel compara **saúde, riscos, drift e custo da dívida de todos os repositórios**, pior saúde no topo, com custo por projeto e ações de re-analisar/remover. Em CI, analisar N repositórios popula o mesmo painel; a tool MCP `get_portfolio` responde "qual repositório está pior?". `tic-analyzer portfolio [--json]` lista pela CLI.
 
 ### Skills de engenharia (fiéis a [mattpocock/skills](https://github.com/mattpocock/skills))
 
@@ -137,6 +162,18 @@ Cruza o churn do git (90 dias) com as métricas estáticas: **score 0–100 por 
 | **zoom-out** | `get_zoom_out()` = visão macro por fronteiras de domínio (Mermaid); `get_zoom_out(entity)` = onde aquela parte se encaixa: módulo dono, quem a chama, em vocabulário de domínio |
 
 *Toda saída de triagem segue a regra da skill: começa com "This was generated by AI during triage."*
+
+### Sistema vivo (event-driven, contínuo)
+
+Em vez de só responder quando perguntado, o TIC observa, lembra e avisa:
+
+- **Olhos** — file-watch reativo no modo `serve` e no app (toggle **🔴 Ao Vivo**): re-analisa sozinho quando você salva, debounced
+- **Batimento** — `activity.json`: linha do tempo do que mudou a cada análise (health subiu/caiu, riscos novos, regras violadas, módulos add/removidos)
+- **Aprendizado** — quando um arquivo marcado de alto risco depois recebe um commit de fix, registra `prediction-confirmed` e calcula a **taxa de acerto** do preditor (`prediction-accuracy.json`)
+- **Voz interna** — push **SSE em `GET /events`**: a aba Atividade e os dashboards atualizam ao vivo; a IA assina via `get_activity` ("o que mudou recentemente?")
+- **Voz externa** — alertas outbound (Slack + webhook JSON genérico + notificação desktop nativa) quando um limiar de `alerts` é cruzado
+
+> A re-análise é **incremental**: arquivos não alterados reusam os símbolos AST cacheados (`symbol-cache.json`), pulando o tree-sitter — a fase mais cara. A resolução de referências roda sempre (é barata e cruza arquivos), então o grafo incremental é **idêntico** ao completo. No `serve`/Ao Vivo isso reduz a re-análise de minutos para segundos em repositórios grandes.
 
 ---
 
@@ -158,7 +195,9 @@ tic-analyzer analyze <path> [--json] [--no-ai-files]
 tic-analyzer health <path>
 tic-analyzer pr-review --base <dir> --head <dir> [--out report.md]
            [--gate new-high-risks,new-rule-violations,health-drop:5] [--brief-out brief.md]
-tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>] [--watch <min>]
+tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>] [--watch <min>] [--debounce <seg>]
+tic-analyzer report <path> [--out report.html]                                          # relatório executivo (HTML)
+tic-analyzer portfolio [--json]                                                          # portfólio (todos os projetos analisados)
 ```
 
 Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro. Cada execução registra em `.tic-code/pr-history.json` (alimenta o dashboard).
@@ -184,7 +223,7 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 
 ---
 
-## As 45 ferramentas MCP
+## As 50 ferramentas MCP
 
 **Impacto (use primeiro):** `get_blast_radius` (resumo ~200 tokens — **comece por ele**) · `get_impact_of` · `get_table_impact` · `get_diff_impact` · `get_impact`
 
@@ -194,7 +233,9 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 
 **Contexto:** `get_quick_context` · `list_modules` · `get_module(detail)` · `search_module` · `get_multigraph(detail)` · `get_diagram`
 
-**Qualidade e saúde:** `get_health` · `get_metrics` · `get_hotspots` · `get_violations` · `get_patterns` · `get_inheritance` · `get_dead_components`
+**Valor & custo:** `get_roi` · `get_ownership` · `suggest_reviewers` · `get_portfolio`
+
+**Qualidade e saúde:** `get_health` · `get_activity` (timeline do sistema vivo) · `get_metrics` · `get_hotspots` · `get_violations` · `get_patterns` · `get_inheritance` · `get_dead_components`
 
 **Banco:** `get_db_schema` · `get_table_columns` · `get_table_access` · `get_plsql_object` · `get_dead_plsql`
 
@@ -264,7 +305,7 @@ src/
       snapshots            histórico de health
       triageStore          fila de triagem (máquina de estados da skill)
   cli/               headless: analyze / health / pr-review / serve
-  mcp/               MCP Server HTTP/SSE (45 tools, auth Bearer, agent briefs)
+  mcp/               MCP Server HTTP/SSE (50 tools, auth Bearer, push SSE /events, agent briefs)
   ui/                React: Health, Governança, Explorador, Impacto
 action.yml           GitHub Action (PR review, cache incremental, issues de triagem)
 ```
